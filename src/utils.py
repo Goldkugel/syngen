@@ -1,7 +1,7 @@
 import pandas as pd
 import sys
 import os
-import datetime
+from datetime import datetime
 
 import Levenshtein  as lev
 
@@ -14,6 +14,32 @@ from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TaskID, \
     TaskProgressColumn, TimeElapsedColumn
 
+def cleanUp(data : pd.DataFrame) -> pd.DataFrame:
+    hpoIDs = list(set(data[hpoidColumn].tolist()))
+    datasets = []
+
+    for hpoID in hpoIDs:
+        subset = data[data[hpoidColumn] == hpoID].copy().reset_index(drop=True)
+        remove = []
+
+        for index, row in subset.iterrows():
+            for index2, row2 in subset.iterrows():
+                # If the rows are distinct but have the same content, class, 
+                # language, and sytem they can be merged.
+                if (index2 > index and
+                    str(row[contentColumn]).lower()  == str(row2[contentColumn]).lower() and 
+                    row[classColumn]    == row2[classColumn] and 
+                    row[languageColumn] == row2[languageColumn] and 
+                    row[systemColumn]   == row2[systemColumn]):
+                    subset.loc[index, countColumn] = \
+                        subset.loc[index, countColumn] + \
+                            subset.loc[index2, countColumn]
+                    remove.append(index2)
+
+        subset = subset.drop(index=remove)
+        datasets.append(subset)
+
+    return pd.concat(datasets).reset_index(drop=True)
 
 def formatting(string : str = "", quotationChar : str = quotationCharacter) -> list:
     ret = None
@@ -66,7 +92,7 @@ def getChildLabels(
     Get all labels of child concepts for a given ID in the specified language.
     """
     ret = []
-    childIDs = getElements(data, hpoID, universalLanguage, childrenClass)
+    childIDs = getElements(data, hpoID, childrenClass, universalLanguage)
     for childID in childIDs:
         ret += getElements(data, childID, labelClass)
     return ret
@@ -84,22 +110,28 @@ def getParentLabels(
     classFilter = contentFilter[contentFilter[classColumn] == childrenClass]
     parentIDs = classFilter[hpoidColumn].tolist()
     for parentID in parentIDs:
-        ret += getElements(data, parentID, labelClass)
+        ret += getElements(data, parentID, labelClass, "en")
     return ret
 
 def getRows(
     data: pd.DataFrame, 
     hpoID: str,  
     # Default to label class
-    className = labelClass
+    className = labelClass,
+    language: str = "en"
 ) -> pd.DataFrame:
     # Filter data to only include rows with the given ID.
     ret = data[data[hpoidColumn] == hpoID]
 
-    if isinstance(className, str):
-        ret = ret[ret[classColumn] == className]
+    if len(ret.index) > 0:
+        ret = ret[ret[languageColumn] == language]
+
+        if isinstance(className, str):
+            ret = ret[ret[classColumn] == className]
+        else:
+            ret = ret[ret[classColumn].isin(className)]
     else:
-        ret = ret[ret[classColumn].isin(className)]
+        ret = None
         
     return ret
 
@@ -112,12 +144,13 @@ def getElements(
     data: pd.DataFrame, 
     hpoID: str,   
     # Default to label class
-    className = labelClass
+    className = labelClass,
+    language: str = "en"
 ) -> list:
-    ret = getRows(data, hpoID, className) 
+    ret = getRows(data, hpoID, className, language) 
 
     # Check if any elements remain after filtering.
-    if len(ret.index) > 0:
+    if ret is not None and len(ret.index) > 0:
         ret = ret[contentColumn].tolist()
     else:
         ret = []

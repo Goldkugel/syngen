@@ -1,7 +1,10 @@
 import pandas as pd
 import sys
-
-sys.path.insert(1, '../')
+import os
+import math
+import torch
+import torch.nn.functional as F
+import numpy as np
 
 # Prevent Python from generating .pyc files (compiled bytecode files)
 sys.dont_write_bytecode = True
@@ -9,46 +12,148 @@ sys.dont_write_bytecode = True
 # Import necessary modules and configuration settings
 from prompts import *
 from model import *
-from hpot.src.createSynonymsChallenge.configSynonymsChallenge import *
 from utils import *
+
+from transformers import BertTokenizer, BertModel
 
 printHeader(f"Enrich Concepts with Synonyms")
 
+hpoIDs = testIDs
+
 # Load the dataset from a pickle file
-data = None
-if useOutputAsInput and isFile(outputFile):
-    data = readPickle(outputFile)
-else:
-    data = readPickle(inputFile)
-    data[systemColumn] = [""] * len(data.index)
-    data[countColumn] = [1] * len(data.index)
+data = readPickle(inputFile)
+
+parents = [[]  for _ in range(0, len(hpoIDs))]
+children = [[]  for _ in range(0, len(hpoIDs))]
+
+with newProgress() as progress:
+
+    task = newTask(progress, len(hpoIDs), "Get Parents and Children")
+
+    for index in range(0, len(hpoIDs)):
+        children[index] = getChildLabels(data, hpoIDs[index])
+        parents[index] = getParentLabels(data, hpoIDs[index])
+        progress.update(task, advance=1)
+
+log("Removing unnecessary data.")
+lostByFilter = len(data.index)
+data = data[data[hpoidColumn].isin(hpoIDs)]
+log(f"Removed {lostByFilter - len(data.index)} entries.")
+
+data[systemColumn] = [""] * len(data.index)
+data[countColumn] = [1] * len(data.index)
 
 log("Removing empty data.")
 data, lostByFilter = removeEmptyRows(data=data)
 log(f"Removed {lostByFilter} entries.")
 
-# Retrieve all unique concept IDs
-hpoIDs = list(set(data[hpoidColumn].tolist()))
+log(f"Left with {len(data.index)} entries.")
+
+log("Adding Definitions.")
 
 log("Set up the LLM.")
 model = Model(model=model_id)
 
-instructions = [getSystem()] * len(hpoIDs)
+definitions = data.loc[(data[languageColumn] == "en") & 
+            (data[classColumn] == definitionClass), hpoidColumn].tolist()
+
+sourceDefinitionCount = len(data.loc[
+    (data[languageColumn] == "en") & 
+    (data[classColumn] == definitionClass), hpoidColumn].tolist())
+
+if (sourceDefinitionCount > 0):
+    log(f"Found {sourceDefinitionCount}/{len(hpoIDs)} English " \
+        "definitions.")
+
+    noDefinitions = hpoIDs.copy()
+
+    for hpoID in definitions:
+        noDefinitions.remove(hpoID)
+
+    if (len(noDefinitions) > 0):
+
+        instructions = [getPreTaskSystem()] * len(noDefinitions)
+        log(f"{model.addPrompt(systemRole, instructions)} system instructions " \
+            "added to the model.")
+
+        messages = []
+
+        for hpoID in noDefinitions:
+            messages.append(getPreTaskPart1("".join(getElements(data, hpoID, "en",labelClass))))
+
+        log(f"{model.addPrompt(userRole, messages)} prompts added to " \
+            "the model. Start generating responses.")
+        model.generate()
+
+        messages = []
+        for hpoID in noDefinitions:
+            messages.append(getPreTaskPart2(parents[hpoIDs == hpoID]))
+
+        c = model.addPrompt(userRole, messages)
+        log(f"{c} prompts added to the model. Start generating responses.")
+        model.generate()
+
+        messages = []
+        for hpoID in noDefinitions:
+            messages.append(getPreTaskPart3(children[hpoIDs == hpoID]))
+
+        c = model.addPrompt(userRole, messages)
+        log(f"{c} prompts added to the model. Start generating responses.")
+        model.generate()
+
+        log(f"{model.addPrompt(userRole, [getPreTaskPart4()])} " \
+            "prompts added to the model. Start generating responses.")
+        model.generate()
+
+        messageHistories = model.getMessageHistories()
+
+        definitionTexts = []
+
+        with newProgress() as progress:
+            task = newTask(progress, len(messageHistories), "Processing gen. Text")
+
+            for messageHistory in messageHistories:
+                definitionTexts.append(messageHistory[-1][messageTextElement].
+                    replace("\n", "").strip())
+                progress.update(task, advance=1)
+
+        formattedDefinition = pd.DataFrame({
+            languageColumn  : ["en"] * len(definitionTexts),
+            contentColumn   : definitionTexts,
+            classColumn     : [enrichedSourceDefinitionClass] * len(definitionTexts),
+            hpoidColumn     : noDefinitions#,
+            #sourceElemement : [[-1]] * len(definitions)
+        })
+
+        data = pd.concat([data, formattedDefinition])
+
+        # Reset index after cleaning
+        data = data.reset_index(drop=True)
+
+        model.logPrompts()
+
+log("Definition adding completed")
+
+model.reset()
+
+instructions = [getSystem()] * len(hpoIDs) * generateTimes
 log(f"{model.addPrompt(systemRole, instructions)} system instructions " \
     "added to the model.")
 
 # Add first instruction.
 messages = []
 
-for hpoID in hpoIDs:
-    messages.append(getTaskPart1(
-        label = "".join(getElements(data, hpoID, sourceLanguageShort, 
-            [labelClass]
-        )),
-        definition = "".join(getElements(data, hpoID, sourceLanguageShort, 
-            [definitionClass, enrichedSourceDefinitionClass]
-        ))
-    ))
+with newProgress() as progress:
+
+    task = newTask(progress, len(hpoIDs) * generateTimes, "Set System Prompt")
+
+    for hpoID in hpoIDs:
+        for _ in range(0, generateTimes):
+            messages.append(getTaskPart1(
+                "".join(getElements(data, hpoID, [labelClass], "en")),
+                "".join(getElements(data, hpoID, [definitionClass, enrichedSourceDefinitionClass], "en"))
+            ))
+            progress.update(task, advance=1)
 
 log(f"{model.addPrompt(userRole, messages)} prompts added to " \
     "the model. Start generating responses.")
@@ -62,105 +167,113 @@ log(f"{model.addPrompt(userRole, [getTaskPart3()])} prompts " \
     "added to the model. Start generating responses.")
 model.generate()
 
-messages = []
-for hpoID in hpoIDs:
-    messages.append(getTaskPart4(
-        getParentLabels(data, hpoID, sourceLanguageShort)
-    ))
-
-c = model.addPrompt(userRole, messages)
-log(f"{c} prompts added to the model. Start generating responses.")
-model.generate()
-
-messages = []
-for hpoID in hpoIDs:
-    messages.append(getTaskPart5(
-        getChildLabels(data, hpoID, sourceLanguageShort)
-    ))
-
-c = model.addPrompt(userRole, messages)
-log(f"{c} prompts added to the model. Start generating responses.")
-model.generate()
-
-log(f"{model.addPrompt(userRole, [getTaskPart6()])} prompts " \
+log(f"{model.addPrompt(userRole, [getTaskPart4()])} prompts " \
     "added to the model. Start generating responses.")
 model.generate()
 
-synonymLists = []
+messages = []
+for index in range(0, len(hpoIDs)):
+    for _ in range(0, generateTimes):
+        messages.append(getTaskPart5(parents[index]))
+
+c = model.addPrompt(userRole, messages)
+log(f"{c} prompts added to the model. Start generating responses.")
+model.generate()
+
+messages = []
+for index in range(0, len(hpoIDs)):
+    for _ in range(0, generateTimes):
+        messages.append(getTaskPart6(children[index]))
+
+c = model.addPrompt(userRole, messages)
+log(f"{c} prompts added to the model. Start generating responses.")
+model.generate()
+
+log(f"{model.addPrompt(userRole, [getTaskPart7()])} prompts " \
+    "added to the model. Start generating responses.")
+model.generate()
+
+model.logPrompts()
+
 messagesHistories = model.getMessageHistories()
 
-incorrectFormat = []
+synonymLists = [[]  for _ in range(0, len(messagesHistories))]
+incorrectFormats = []
 
 # Process each concept ID to enrich synonyms
 with newProgress() as progress:
     task = newTask(progress, len(messagesHistories), "Processing Synonyms")
     
     for index, messagesHistory in enumerate(messagesHistories):
-        
+            
         answer = str(messagesHistory[-1][messageTextElement]).strip()
         answer = replaceQuotes(answer.replace("\n", "").replace(".", ""))
 
-        synonymList = list(set(formatting(answer)))
+        tmp = list(set(formatting(answer)))
+        synonymLists[index] = [str(t).lower() for t in tmp]
+        if synonymLists[index] is not None and "" in synonymLists[index]:
+            synonymLists[index].remove("")
         
-        if len(synonymList) == 0:
+        if len(synonymLists[index]) == 0:
             if len(answer) > 0:
-                incorrectFormat.append(hpoIDs[index])
-        else:
-            source = data[
-                (data[hpoidColumn] == hpoIDs[index]) & 
-                (data[languageColumn] == sourceLanguageShort) & 
-                (data[classColumn] == labelClass)
-            ]
-            elementIDs = source[elementIDColumn].tolist()
+                incorrectFormats.append(hpoIDs[index])
 
-            id = -1
-            if len(elementIDs) == 1:
-                id = elementIDs[0]
-
-            synonymLists.append(pd.DataFrame({
-                languageColumn  : [sourceLanguageShort] * len(synonymList),
-                contentColumn   : synonymList,
-                classColumn     : [enrichedSourceExactSynonymClass] * 
-                    len(synonymList),
-                hpoidColumn     : [hpoIDs[index]] * len(synonymList),
-                sourceElemement : [id] * len(synonymList),
-                systemColumn    : [model_id] * len(synonymList),
-                countColumn     : [1] * len(synonymList),
-                elementIDColumn : 
-                    [getNextElementID() for _ in range(0, len(synonymList))]
-            }))
         progress.update(task, advance=1)
 
-log(f"{len(incorrectFormat)} not formatted Answers.")
-if len(incorrectFormat) > 0:
-    for inc in incorrectFormat:
-        log(f"Response for {inc} was not formatted.")
+log(f"Incorrect formats count: {len(incorrectFormats)}")
+if (len(incorrectFormats) > 0):
+    log(f"{incorrectFormats}")
 
-log("Merging data.")
-synonymLists.append(data)
-data = pd.concat(synonymLists)
-log("Merged data.")
+result = [[] for _ in range(0, len(synonymLists))]
 
-log("Removing empty data.")
-data, lostByFilter = removeEmptyRows(data=data)
-log(f"Removed {lostByFilter} entries.")
+log("Consolidating results...")
+for index, l in enumerate(synonymLists):
+    result[index] = pd.DataFrame({
+        hpoidColumn : [hpoIDs[math.floor(index / generateTimes)]] * len(l),
+        contentColumn : l,
+        classColumn : [enrichedSourceExactSynonymClass] * len(l),
+        languageColumn : ["en"] * len(l),
+        #sourceElemement : [-1 for _ in range(0, len(l))],
+        systemColumn : [model_id] * len(l),
+        "round" : [(index % generateTimes) + 1] * len(l)
+        #elementIDColumn : [getNextElementID() for _ in range(0, len(l))]
+    })
+log("Results consolidated.")
 
-# Remove duplicate rows
-log("Merged duplicates.")
-data, lostByFilter = cleanUp(data)
-log(f"Merged {lostByFilter} duplicates.")
+generated = pd.concat(result)
+generated = generated.drop_duplicates(ignore_index=False).reset_index(drop=True)
 
-# Reset index after cleaning
-data = data.reset_index(drop=True)
+gold = data[((data[classColumn] == labelClass) | (data[classColumn] == exactSynonymClass)) & (data[languageColumn] == "en")].drop(['source'], axis=1)
+gold = gold.drop_duplicates(ignore_index=True).reset_index(drop=True)
 
-model.logPrompts()
+for index in range(0, len(gold.index)):
+    gold.loc[index, contentColumn] = str(gold.loc[index, contentColumn]).lower()
 
-# Display summary of the dataset
-printRowCount(data)
-printDataSummary(data)
+log("Load BERT Tokenizer...")
+tokenizer = BertTokenizer.from_pretrained("google-bert/bert-large-uncased")
+model = BertModel.from_pretrained("google-bert/bert-large-uncased")
+log("BERT Tokenizer loaded.")
 
-# Save the updated dataset
-writePickle(data, outputFile)
-data.to_csv("/home/pallaoro/hpot/data/createSynonymsChallenge/output.csv")
+def get_bert_embedding(text):
+    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    return outputs.last_hidden_state[:, 0, :].squeeze()
 
-printHeader(f"Enrichment of {sourceLanguage} Terms with Synonyms completed")
+def embed(data : list) -> list:
+    ret = [[] for _ in range(0, len(data))]
+
+    for index, l in enumerate(data):
+        ret[index] = get_bert_embedding(l)
+
+    return torch.stack(ret)
+
+log("Generating embeddings...")
+embeddingsGenerated = embed(generated[contentColumn].tolist())
+embeddingsGold = embed(gold[contentColumn].tolist())
+log("Embeddings generated.")
+
+generated.to_csv(outputFileGenerated)
+pd.DataFrame(embeddingsGenerated.numpy()).to_csv(outputFileGeneratedEmbeddings, index = False)
+gold.to_csv(outputFileGold)
+pd.DataFrame(embeddingsGold.numpy()).to_csv(outputFileGoldEmbeddings, index = False)
