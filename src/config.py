@@ -5,28 +5,40 @@ import sys
 sys.dont_write_bytecode = True
 
 useOutputAsInput = True
-generateTimes = 50
+generateTimes = 100
 
-#model_id = "meta-llama/Llama-3.2-1B"
-#model_id = "meta-llama/Llama-3.2-3B"
-#model_id = "meta-llama/Llama-3.1-8B"
-#model_id = "meta-llama/Llama-3.1-70B"
+# Target Large Models:
+#model_id = "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+#model_id = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+#model_id = "google/medgemma-27b-text-it"
+
+# Target Small Models:
+# model_id = "mistralai/Mistral-7B-Instruct-v0.3"
+#model_id = "google/medgemma-4b-it"
+model_id = "meta-llama/Llama-3.2-1B-Instruct"
+#model_id = "meta-llama/Llama-3.2-3B-Instruct"
+#model_id = "Qwen/Qwen3-4B"
+
+#model_id = "google/medgemma-4b-it"
+#model_id = "google/medgemma-27b-text-it"
 #model_id = "meta-llama/Llama-3.2-1B-Instruct"
 #model_id = "meta-llama/Llama-3.2-3B-Instruct"
-#model_id = "meta-llama/Llama-3.1-8B-Instruct"
+#model_id = "meta-llama/Meta-Llama-3-8B-Instruct"
 #model_id = "meta-llama/Llama-3.3-70B-Instruct"
-model_id = "google/medgemma-27b-text-it"
-#model_id = "lingshu-medical-mllm/Lingshu-32B"
+#model_id = "Qwen/Qwen3-8B"
+#model_id = "Qwen/Qwen3-4B"
+#model_id = "Qwen/Qwen3-14B"
+#model_id = "Qwen/Qwen3-32B"
 
 #gpu_id = "1,2,3,4"
-gpu_id = "4,5,6,7"
-#gpu_id = "6,7"
+#gpu_id = "7"
+gpu_id = "7"
 
 
 
 # Float that controls the cumulative probability of the top tokens to consider.
 # Must be in (0, 1]. Set to 1 to consider all tokens.
-top_p=0.9
+top_p=1
 
 max_model_len = 32768
 max_num_batched_tokens = 2 * max_model_len
@@ -34,7 +46,7 @@ max_num_batched_tokens = 2 * max_model_len
 # Float that controls the randomness of the sampling. Lower values make the 
 # model more deterministic, while higher values make the model more random. 
 # Zero means greedy sampling.
-temperature = 0.9
+temperature = 0.95
 
 quotationCharacter = "\""
 
@@ -82,7 +94,7 @@ headerLen = 80
 headerSeparator = headerChar * headerLen
 
 progressBarColor = "cyan"
-progressBarTextLength = 20
+progressBarTextLength = 40
 
 universalLanguage = "universal"
 
@@ -94,6 +106,7 @@ elementIDColumn = "id"
 sourceElemement = "source"
 systemColumn = "system"
 countColumn = "count"
+roundColumn = "round"
 
 labelClass                      = "label"
 definitionClass                 = "definition"
@@ -116,10 +129,12 @@ dataDir = "../data"
 logFile = f"{dataDir}/hpot.log"
 logFilePrompts = f"{dataDir}/prompts.log"
 
+postfix = model_id[model_id.index("/") + 1:]
+
 inputFile = f"{dataDir}/input/hpo.data.pkl"
-outputFileGenerated = f"{dataDir}/output/generated.csv"
+outputFileGenerated = f"{dataDir}/output/{generateTimes}generated{postfix}.csv"
 outputFileGold = f"{dataDir}/output/gold.csv"
-outputFileGeneratedEmbeddings = f"{dataDir}/output/generatedembeddings.csv"
+outputFileGeneratedEmbeddings = f"{dataDir}/output/{generateTimes}generatedembeddings{postfix}.csv"
 outputFileGoldEmbeddings = f"{dataDir}/output/goldembeddings.csv"
 
 sourceSynonymExampleResult = [
@@ -144,7 +159,7 @@ sourceSynonymExampleResult = [
 testIDs = list(set([
     'HP:0001756', 'HP:0003189', 'HP:0000708', 'HP:0008069', 'HP:0009778',
     'HP:0008331', 'HP:0007165', 'HP:0002020', 'HP:0010759', 'HP:0002659']))
-"""
+""",
     'HP:0009891', 'HP:0007018', 'HP:0032514', 'HP:0000434', 'HP:0000692', 
     'HP:0025675', 'HP:0001511', 'HP:0000286', 'HP:0000448', 'HP:0000691', 
     'HP:0001092', 'HP:0001315', 'HP:0000683', 'HP:0000252', 'HP:0000239', 

@@ -5,6 +5,7 @@ import math
 import torch
 import torch.nn.functional as F
 import numpy as np
+import logging
 
 # Prevent Python from generating .pyc files (compiled bytecode files)
 sys.dont_write_bytecode = True
@@ -35,7 +36,7 @@ with newProgress() as progress:
         parents[index] = getParentLabels(data, hpoIDs[index])
         progress.update(task, advance=1)
 
-log("Removing unnecessary data.")
+log("Removing unnecessary data...")
 lostByFilter = len(data.index)
 data = data[data[hpoidColumn].isin(hpoIDs)]
 log(f"Removed {lostByFilter - len(data.index)} entries.")
@@ -43,7 +44,7 @@ log(f"Removed {lostByFilter - len(data.index)} entries.")
 data[systemColumn] = [""] * len(data.index)
 data[countColumn] = [1] * len(data.index)
 
-log("Removing empty data.")
+log("Removing empty data...")
 data, lostByFilter = removeEmptyRows(data=data)
 log(f"Removed {lostByFilter} entries.")
 
@@ -51,7 +52,9 @@ log(f"Left with {len(data.index)} entries.")
 
 log("Adding Definitions.")
 
-log("Set up the LLM.")
+logging.getLogger("vllm").setLevel(logging.ERROR)
+
+log(f"Set up the LLM ({model_id})...")
 model = Model(model=model_id)
 
 definitions = data.loc[(data[languageColumn] == "en") & 
@@ -82,7 +85,7 @@ if (sourceDefinitionCount > 0):
             messages.append(getPreTaskPart1("".join(getElements(data, hpoID, "en",labelClass))))
 
         log(f"{model.addPrompt(userRole, messages)} prompts added to " \
-            "the model. Start generating responses.")
+            "the model. Start generating responses...")
         model.generate()
 
         messages = []
@@ -90,7 +93,7 @@ if (sourceDefinitionCount > 0):
             messages.append(getPreTaskPart2(parents[hpoIDs == hpoID]))
 
         c = model.addPrompt(userRole, messages)
-        log(f"{c} prompts added to the model. Start generating responses.")
+        log(f"{c} prompts added to the model. Start generating responses...")
         model.generate()
 
         messages = []
@@ -98,11 +101,11 @@ if (sourceDefinitionCount > 0):
             messages.append(getPreTaskPart3(children[hpoIDs == hpoID]))
 
         c = model.addPrompt(userRole, messages)
-        log(f"{c} prompts added to the model. Start generating responses.")
+        log(f"{c} prompts added to the model. Start generating responses...")
         model.generate()
 
         log(f"{model.addPrompt(userRole, [getPreTaskPart4()])} " \
-            "prompts added to the model. Start generating responses.")
+            "prompts added to the model. Start generating responses...")
         model.generate()
 
         messageHistories = model.getMessageHistories()
@@ -121,8 +124,7 @@ if (sourceDefinitionCount > 0):
             languageColumn  : ["en"] * len(definitionTexts),
             contentColumn   : definitionTexts,
             classColumn     : [enrichedSourceDefinitionClass] * len(definitionTexts),
-            hpoidColumn     : noDefinitions#,
-            #sourceElemement : [[-1]] * len(definitions)
+            hpoidColumn     : noDefinitions
         })
 
         data = pd.concat([data, formattedDefinition])
@@ -132,13 +134,13 @@ if (sourceDefinitionCount > 0):
 
         model.logPrompts()
 
-log("Definition adding completed")
+log("Definition adding completed.")
 
 model.reset()
 
-instructions = [getSystem()] * len(hpoIDs) * generateTimes
-log(f"{model.addPrompt(systemRole, instructions)} system instructions " \
-    "added to the model.")
+#instructions = [getSystem()] * len(hpoIDs) * generateTimes
+#log(f"{model.addPrompt(systemRole, instructions)} system instructions " \
+#    "added to the model...")
 
 # Add first instruction.
 messages = []
@@ -149,52 +151,36 @@ with newProgress() as progress:
 
     for hpoID in hpoIDs:
         for _ in range(0, generateTimes):
-            messages.append(getTaskPart1(
+            messages.append(getAlternativeEasyPrompt1(
                 "".join(getElements(data, hpoID, [labelClass], "en")),
-                "".join(getElements(data, hpoID, [definitionClass, enrichedSourceDefinitionClass], "en"))
+                "".join(getElements(data, hpoID, [definitionClass, enrichedSourceDefinitionClass], "en")),
+                parents[hpoIDs.index(hpoID)],
+                children[hpoIDs.index(hpoID)]
             ))
             progress.update(task, advance=1)
 
 log(f"{model.addPrompt(userRole, messages)} prompts added to " \
-    "the model. Start generating responses.")
+    "the model. Start generating responses...")
 model.generate()
 
-log(f"{model.addPrompt(userRole, [getTaskPart2()])} prompts " \
-    "added to the model. Start generating responses.")
+log(f"{model.addPrompt(userRole, [getAlternativeEasyPrompt2()])} prompts " \
+    "added to the model. Start generating responses...")
 model.generate()
 
-log(f"{model.addPrompt(userRole, [getTaskPart3()])} prompts " \
-    "added to the model. Start generating responses.")
+log(f"{model.addPrompt(userRole, [getAlternativeEasyPrompt3()])} prompts " \
+    "added to the model. Start generating responses...")
 model.generate()
 
-log(f"{model.addPrompt(userRole, [getTaskPart4()])} prompts " \
-    "added to the model. Start generating responses.")
+log(f"{model.addPrompt(userRole, [getAlternativeEasyPrompt4()])} prompts " \
+    "added to the model. Start generating responses...")
 model.generate()
 
-messages = []
-for index in range(0, len(hpoIDs)):
-    for _ in range(0, generateTimes):
-        messages.append(getTaskPart5(parents[index]))
-
-c = model.addPrompt(userRole, messages)
-log(f"{c} prompts added to the model. Start generating responses.")
-model.generate()
-
-messages = []
-for index in range(0, len(hpoIDs)):
-    for _ in range(0, generateTimes):
-        messages.append(getTaskPart6(children[index]))
-
-c = model.addPrompt(userRole, messages)
-log(f"{c} prompts added to the model. Start generating responses.")
-model.generate()
-
-log(f"{model.addPrompt(userRole, [getTaskPart7()])} prompts " \
-    "added to the model. Start generating responses.")
+log(f"{model.addPrompt(userRole, [getAlternativeEasyPrompt4()])} prompts " \
+    "added to the model. Start generating responses...")
 model.generate()
 
 model.logPrompts()
-
+"""
 messagesHistories = model.getMessageHistories()
 
 synonymLists = [[]  for _ in range(0, len(messagesHistories))]
@@ -216,7 +202,7 @@ with newProgress() as progress:
         
         if len(synonymLists[index]) == 0:
             if len(answer) > 0:
-                incorrectFormats.append(hpoIDs[index])
+                incorrectFormats.append(hpoIDs[int(index / generateTimes)])
 
         progress.update(task, advance=1)
 
@@ -233,17 +219,24 @@ for index, l in enumerate(synonymLists):
         contentColumn : l,
         classColumn : [enrichedSourceExactSynonymClass] * len(l),
         languageColumn : ["en"] * len(l),
-        #sourceElemement : [-1 for _ in range(0, len(l))],
         systemColumn : [model_id] * len(l),
         "round" : [(index % generateTimes) + 1] * len(l)
-        #elementIDColumn : [getNextElementID() for _ in range(0, len(l))]
     })
 log("Results consolidated.")
 
+log("Removing duplicates...")
 generated = pd.concat(result)
 generated = generated.drop_duplicates(ignore_index=False).reset_index(drop=True)
+log("Duplicates removed.")
 
-gold = data[((data[classColumn] == labelClass) | (data[classColumn] == exactSynonymClass)) & (data[languageColumn] == "en")].drop(['source'], axis=1)
+log("Removing empty data...")
+generated, lostByFilter = removeEmptyRows(data=generated)
+log(f"Removed {lostByFilter} entries.")
+
+gold = data[((data[classColumn] == labelClass) | (data[classColumn] == exactSynonymClass)) & (data[languageColumn] == "en")]
+if "source" in gold.columns:
+    gold = gold.drop(['source'], axis=1)
+    
 gold = gold.drop_duplicates(ignore_index=True).reset_index(drop=True)
 
 for index in range(0, len(gold.index)):
@@ -263,17 +256,26 @@ def get_bert_embedding(text):
 def embed(data : list) -> list:
     ret = [[] for _ in range(0, len(data))]
 
-    for index, l in enumerate(data):
-        ret[index] = get_bert_embedding(l)
+    with newProgress() as progress:
+
+        task = newTask(progress, len(data), "Generate Embeddings")
+
+        for index, l in enumerate(data):
+            ret[index] = get_bert_embedding(l)
+            progress.update(task, advance=1)
 
     return torch.stack(ret)
 
 log("Generating embeddings...")
 embeddingsGenerated = embed(generated[contentColumn].tolist())
-embeddingsGold = embed(gold[contentColumn].tolist())
+generated.to_csv(outputFileGenerated, mode="a", header=not os.path.exists(outputFileGenerated), index=False)
+pd.DataFrame(embeddingsGenerated.numpy()).to_csv(outputFileGeneratedEmbeddings, mode="a", header=not os.path.exists(outputFileGeneratedEmbeddings), index=False)
+
+if not os.path.exists(outputFileGold):
+    embeddingsGold = embed(gold[contentColumn].tolist())
+    gold.to_csv(outputFileGold)
+    pd.DataFrame(embeddingsGold.numpy()).to_csv(outputFileGoldEmbeddings, index = False)
 log("Embeddings generated.")
 
-generated.to_csv(outputFileGenerated)
-pd.DataFrame(embeddingsGenerated.numpy()).to_csv(outputFileGeneratedEmbeddings, index = False)
-gold.to_csv(outputFileGold)
-pd.DataFrame(embeddingsGold.numpy()).to_csv(outputFileGoldEmbeddings, index = False)
+log("Task completed.")
+"""

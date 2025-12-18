@@ -135,10 +135,10 @@ class Model:
         self.addPrompt(role = modelRole, message = outputs)
 
     def generate(self, logging : bool = False) -> None:
-        if "gemma" in self.model.lower():
-            self.generateGemma(logging)
-        else:
-            self.generateLlama(logging)
+        #if "gemma" in self.model.lower():
+        self.generateGemma(logging)
+        #else:
+        #    self.generateLlama(logging)
 
     def getMessageHistories(self) -> list[list[object]]:
         return self.messageHistories
