@@ -11,42 +11,28 @@ generateTimes = 100
 #model_id = "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
 #model_id = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
 #model_id = "google/medgemma-27b-text-it"
-
-# Target Small Models:
-# model_id = "mistralai/Mistral-7B-Instruct-v0.3"
-#model_id = "google/medgemma-4b-it"
-model_id = "meta-llama/Llama-3.2-1B-Instruct"
-#model_id = "meta-llama/Llama-3.2-3B-Instruct"
-#model_id = "Qwen/Qwen3-4B"
-
-#model_id = "google/medgemma-4b-it"
-#model_id = "google/medgemma-27b-text-it"
-#model_id = "meta-llama/Llama-3.2-1B-Instruct"
-#model_id = "meta-llama/Llama-3.2-3B-Instruct"
-#model_id = "meta-llama/Meta-Llama-3-8B-Instruct"
 #model_id = "meta-llama/Llama-3.3-70B-Instruct"
-#model_id = "Qwen/Qwen3-8B"
-#model_id = "Qwen/Qwen3-4B"
-#model_id = "Qwen/Qwen3-14B"
-#model_id = "Qwen/Qwen3-32B"
 
-#gpu_id = "1,2,3,4"
+model_id = "google/medgemma-27b-text-it"
+if len(sys.argv) > 1:
+    model_id = sys.argv[1]
+
 #gpu_id = "7"
-gpu_id = "7"
-
-
+gpu_id = "4,5,6,7"
+if len(sys.argv) > 2:
+    gpu_id = sys.argv[2]
 
 # Float that controls the cumulative probability of the top tokens to consider.
 # Must be in (0, 1]. Set to 1 to consider all tokens.
 top_p=1
 
-max_model_len = 32768
+max_model_len = 4 * 8192
 max_num_batched_tokens = 2 * max_model_len
 
 # Float that controls the randomness of the sampling. Lower values make the 
 # model more deterministic, while higher values make the model more random. 
 # Zero means greedy sampling.
-temperature = 0.95
+temperature = 0.99
 
 quotationCharacter = "\""
 
@@ -87,7 +73,7 @@ messageTextElement = "message"
 seed = 2898231092
 
 # Maximum number of tokens to generate per output sequence.
-max_tokens = 2048
+max_tokens = 2 * 2048
 
 headerChar = "="
 headerLen = 80
@@ -113,14 +99,7 @@ definitionClass                 = "definition"
 commentClass                    = "comment"
 exactSynonymClass               = "exactSynonym"
 enrichedSourceExactSynonymClass = "sourceArtificialSynonym"
-rephrasingSourceSynonymClass    = "sourceRephrasing"
-referenceClass                  = "reference"
-relatedSynonymClass             = "relatedSynonym"
 childrenClass                   = "child"
-alternativeSpellingClass        = "alternativeSpelling"
-enrichedTargetExactSynonymClass = "targetArtificialSynonym"
-rephrasingTargetSynonymClass    = "targetRephrasing"
-translationClassPrefix          = "translation"
 enrichedSourceDefinitionClass   = "sourceArtificialDefinition"
 
 # Basic Data Directory.
@@ -132,6 +111,7 @@ logFilePrompts = f"{dataDir}/prompts.log"
 postfix = model_id[model_id.index("/") + 1:]
 
 inputFile = f"{dataDir}/input/hpo.data.pkl"
+outputFileRawGenerated = f"{dataDir}/output/{generateTimes}raw_generated{postfix}.pkl"
 outputFileGenerated = f"{dataDir}/output/{generateTimes}generated{postfix}.csv"
 outputFileGold = f"{dataDir}/output/gold.csv"
 outputFileGeneratedEmbeddings = f"{dataDir}/output/{generateTimes}generatedembeddings{postfix}.csv"

@@ -31,7 +31,8 @@ class Model:
         self.llm = LLM(
             model=model, 
             tensor_parallel_size=len(gpu_id.split(",")), 
-            max_model_len=max_model_len
+            max_model_len=max_model_len,
+            enable_expert_parallel=(model_id == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8")
         )
 
         self.sampling_params = SamplingParams(

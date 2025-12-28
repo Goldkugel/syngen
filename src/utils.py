@@ -222,7 +222,7 @@ def readPickle(file : str = "") -> pd.DataFrame:
 
 def log(string : str, cmdline : bool = True, file : str = logFile) -> None:
     myfile = open(file=file, mode="a")
-    string = "[" + datetime.now().time().strftime("%H:%M:%S") + "] " + \
+    string = "[" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "] " + \
         string
     if cmdline:
         print(string)

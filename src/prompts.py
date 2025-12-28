@@ -233,16 +233,16 @@ def getAlternativeEasyPrompt5() -> str:
     "• Do NOT add extra text outside the JSON object.\n\n" \
     "Output exactly this JSON format:\n\n" \
     "{\n" \
-    "\t'exact_synonyms': [\n" \
-    "\t\t'<<list the remaining exact synonyms>>'" \
+    "\t\"exact_synonyms\": [\n" \
+    "\t\t\"<<list the remaining exact synonyms>>\"" \
     "\t]\n" \
     "}\n\n" \
     "EXAMPLE OUTPUT (for demonstration only):\n\n" \
     "{\n" \
-    "\t'exact_synonyms': [\n" \
-    "\t\t'Delayed puberty',\n" \
-    "\t\t'Pubertal delay',\n" \
-    "\t\t'Late onset of puberty'\n" \
+    "\t\"exact_synonyms\": [\n" \
+    "\t\t\"Delayed puberty\",\n" \
+    "\t\t\"Pubertal delay\",\n" \
+    "\t\t\"Late onset of puberty\"\n" \
     "\t]\n" \
     "}"
 
@@ -381,16 +381,16 @@ def getAlternativeComplexPrompt5() -> str:
     "• Do NOT invent additional fields.\n" \
     "Use the following exact JSON structure:\n\n" \
     "{\n" \
-    "\t'exact_synonyms': [\n" \
-    "\t\t'<<list the remaining exact synonyms>>'" \
+    "\t\"exact_synonyms\": [\n" \
+    "\t\t\"<<list the remaining exact synonyms>>\"" \
     "\t]\n"\
     "}\n\n" \
     "EXAMPLE OUTPUT (for demonstration only):\n\n" \
     "{\n" \
-    "\t'exact_synonyms': [\n" \
-    "\t\t'Delayed puberty',\n" \
-    "\t\t'Pubertal delay',\n" \
-    "\t\t'Late onset of puberty'\n" \
+    "\t\"exact_synonyms\": [\n" \
+    "\t\t\"Delayed puberty\",\n" \
+    "\t\t\"Pubertal delay\",\n" \
+    "\t\t\"Late onset of puberty\"\n" \
     "\t]\n" \
     "}\n\n" \
     "Produce exactly one JSON object as specified above."
