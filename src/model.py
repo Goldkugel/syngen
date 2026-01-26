@@ -4,37 +4,62 @@ import contextlib
 import gc
 import torch
 
+# vLLM imports for model loading and inference
 from vllm import LLM, SamplingParams
 from vllm.distributed import destroy_distributed_environment, destroy_model_parallel
 
+# Project-specific configuration and helpers
 from prompts import *
 from utils   import *
 from config  import *
 
-# Prevent Python from generating .pyc files (compiled bytecode files)
+# Prevent Python from generating .pyc (bytecode cache) files
+# Useful for cleaner environments and containerized deployments
 sys.dont_write_bytecode = True
 
+# Ensure CUDA devices are enumerated by PCI bus ID
+# This guarantees consistent GPU ordering across runs
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
+# Restrict visible GPUs to those specified in config (e.g. "0,1")
 os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
 
 class Model:
+    """
+    Wrapper class around vLLM to manage:
+    - Message histories (chat state)
+    - Prompt formatting for different model families
+    - Text generation
+    - Cleanup of distributed GPU resources
+    """
 
+    # Stores multiple independent conversation histories
     messageHistories = []
 
+    # vLLM-related objects
     llm = None
     sampling_params = None
     model = None
 
     def __init__(self, model : str = model_id):
+        """
+        Initialize the LLM and sampling parameters.
+        """
         self.model = model
 
+        # Initialize vLLM engine
         self.llm = LLM(
-            model=model, 
-            tensor_parallel_size=len(gpu_id.split(",")), 
+            model=model,
+            # Number of GPUs used for tensor parallelism
+            tensor_parallel_size=len(gpu_id.split(",")),
             max_model_len=max_model_len,
-            enable_expert_parallel=(model_id == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8")
+            # Enable expert parallelism only for specific models
+            enable_expert_parallel=(
+                model_id == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+            )
         )
 
+        # Sampling configuration for text generation
         self.sampling_params = SamplingParams(
             temperature=temperature,
             top_p=top_p,
@@ -42,8 +67,20 @@ class Model:
         )
 
     def addPrompt(self, role : str = userRole, message : list = []) -> int:
+        """
+        Add a message (or messages) to the conversation histories.
+
+        Supports:
+        - Broadcasting a single message to all histories
+        - Appending one message per history
+        - Creating new histories if none exist
+
+        Returns:
+            Number of active message histories
+        """
         ret = 0
 
+        # Case 1: Single message broadcast to all histories
         if len(message) == 1 and len(self.messageHistories) > 0:
             for index in range(0, len(self.messageHistories)):
                 self.messageHistories[index].append({
@@ -52,6 +89,7 @@ class Model:
                 })
             ret = len(self.messageHistories)
         else:
+            # Case 2: One message per history
             if len(message) == len(self.messageHistories):
                 for index in range(0, len(self.messageHistories)):
                     self.messageHistories[index].append({
@@ -60,6 +98,7 @@ class Model:
                     })
                 ret = len(self.messageHistories)
             else:
+                # Case 3: Initialize histories when none exist
                 if len(self.messageHistories) == 0 and len(message) > 0:
                     for index in range(0, len(message)):
                         history = []
@@ -73,25 +112,34 @@ class Model:
         return ret
     
     def generateGemma(self, logging : bool = False) -> None:
-
+        """
+        Generate responses using Gemma-style prompt formatting.
+        """
         inputs = []
         
+        # Build a prompt for each conversation history
         for messageHistory in self.messageHistories:
             prompt = ""
-            s = False
+
+            s = False # Tracks whether a system message was just processed
             for message in messageHistory:
                 if message[messageRoleElement] == systemRole:
+
+                    # System messages are converted into user turns
                     prompt += f"{startTurn}{userRole}\n" \
                             f"{message[messageTextElement]}\n\n"
                     s = True
                 else:
                     if s:
+                        # Close system-injected user message
                         prompt +=  f"{message[messageTextElement]}{endTurn}\n"
                         s = False
                     else:
+                        # Standard user/assistant turn
                         prompt += f"{startTurn}{message[messageRoleElement]}\n" \
                             f"{message[messageTextElement]}{endTurn}\n"
 
+            # Prepare model to generate the next assistant response
             prompt += f"{startTurn}{modelRole}"
 
             if logging:
@@ -99,26 +147,32 @@ class Model:
 
             inputs.append(prompt)
 
-        # Generate response  
+        # Run inference  
         generatedText = self.llm.generate(inputs, self.sampling_params)
         outputs = []
 
+        # Extract and clean generated text
         for text in generatedText:
             outputs.append(formatGeneratedText(text.outputs[0].text))
 
+        # Append model responses to histories
         self.addPrompt(role = modelRole, message = outputs)
 
     def generateLlama(self, logging : bool = False) -> None:
-
+        """
+        Generate responses using LLaMA-style prompt formatting.
+        """
         inputs = []
 
+        # Add each message with LLaMA headers
         for messageHistory in self.messageHistories:
             prompt = f"{beginOfText}"
             
             for message in messageHistory:
                 prompt += f"{startHeader}{message[messageRoleElement]}" \
                     f"{endHeader}{message[messageTextElement]}{endOfText}"
-                
+
+            # Signal model to generate assistant response
             prompt += f"{startHeader}{modelRole}{endHeader}"
 
             if logging:
@@ -126,7 +180,7 @@ class Model:
 
             inputs.append(prompt)
 
-        # Generate response  
+        # Run inference 
         generatedText = self.llm.generate(inputs, self.sampling_params)
         outputs = []
 
@@ -136,29 +190,54 @@ class Model:
         self.addPrompt(role = modelRole, message = outputs)
 
     def generate(self, logging : bool = False) -> None:
-        #if "gemma" in self.model.lower():
+        """
+        Dispatch generation based on model type.
+        Currently defaults to Gemma formatting.
+        """
+        # if "gemma" in self.model.lower():
         self.generateGemma(logging)
-        #else:
-        #    self.generateLlama(logging)
+        # else:
+        #     self.generateLlama(logging)
 
     def getMessageHistories(self) -> list[list[object]]:
+        """
+        Return all stored conversation histories.
+        """
         return self.messageHistories
 
     def reset(self) -> None:
+        """
+        Clear all conversation histories.
+        """
         self.messageHistories = []
 
     def logPrompts(self, file : str = logFilePrompts) -> None:
+        """
+        Log every prompt from every history to a file.
+        """
         for index in range(0, len(self.messageHistories)):
             for index2 in range(0, len(self.messageHistories[index])):
                 self.logPrompt(file, index, index2)
 
-    def logPrompt(self, file: str = logFilePrompts, indexHistory : int = 0, indexPrompt : int = -1) -> None:
+    def logPrompt(
+            self, 
+            file: str = logFilePrompts, 
+            indexHistory : int = 0, 
+            indexPrompt : int = -1
+    )-> None:
+        """
+        Log a single prompt entry to file.
+        """
         message = self.messageHistories[indexHistory][indexPrompt]
         log(f"Role: {message[messageRoleElement]}", False, file)
         log("Message: ", False, file)
         log(message[messageTextElement], False, file)
 
     def __del__(self) -> None:
+        """
+        Destructor to aggressively clean up GPU and distributed resources.
+        Prevents memory leaks and CUDA context issues.
+        """
         try:
             del self.llm
         except:
@@ -186,6 +265,10 @@ class Model:
            pass
             
 def formatGeneratedText(text : str) -> str:
+    """
+    Remove model-specific tokens and role markers
+    from generated text before returning it.
+    """
     ret = text.replace(startHeader, "").replace(endHeader, 
         "").replace(endOfText, "").replace(beginOfText, "").replace(modelRole, 
         "").replace(userRole, ""). replace(systemRole, "").strip()

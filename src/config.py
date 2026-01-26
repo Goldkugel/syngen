@@ -4,8 +4,11 @@ import sys
 # Prevent Python from generating .pyc files (compiled bytecode files)
 sys.dont_write_bytecode = True
 
-useOutputAsInput = True
 generateTimes = 100
+
+# =============================================================================
+# Model Configuration
+# =============================================================================
 
 # Target Large Models:
 #model_id = "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
@@ -14,8 +17,9 @@ generateTimes = 100
 #model_id = "meta-llama/Llama-3.3-70B-Instruct"
 
 model_id = "google/medgemma-27b-text-it"
-if len(sys.argv) > 1:
+if len(sys.argv) > 1 and sys.argv[1][0] != "-":
     model_id = sys.argv[1]
+model_name = model_id[model_id.index("/") + 1:]
 
 #gpu_id = "7"
 gpu_id = "4,5,6,7"
@@ -33,6 +37,16 @@ max_num_batched_tokens = 2 * max_model_len
 # model more deterministic, while higher values make the model more random. 
 # Zero means greedy sampling.
 temperature = 0.99
+
+# Maximum number of tokens to generate per output sequence.
+max_tokens = 2 * 2048
+
+# Random seed to use for the generation
+seed = 2898231092
+
+# =============================================================================
+# For Simplification
+# =============================================================================
 
 quotationCharacter = "\""
 
@@ -69,77 +83,278 @@ endOfText2 = f"{startTag}{bar}{endOfTextID2}{bar}{endTag}"
 messageRoleElement = "role"
 messageTextElement = "message"
 
-# Random seed to use for the generation
-seed = 2898231092
-
-# Maximum number of tokens to generate per output sequence.
-max_tokens = 2 * 2048
-
 headerChar = "="
-headerLen = 80
+headerLen = 120
 headerSeparator = headerChar * headerLen
 
 progressBarColor = "cyan"
 progressBarTextLength = 40
 
-universalLanguage = "universal"
+# =============================================================================
+# For Data Curation
+# =============================================================================
+sourceLanguageShort = "en"
+sourceLanguage      = "English"
 
-languageColumn  = "language"
-classColumn     = "class"
-contentColumn   = "content"
 hpoidColumn     = "hpoID"
-elementIDColumn = "id"
-sourceElemement = "source"
-systemColumn = "system"
-countColumn = "count"
-roundColumn = "round"
+classColumn     = "class"
+typeColumn      = "type"
+contentColumn   = "content"
+systemColumn    = "system"
+roundColumn     = "round"
+
+# =============================================================================
+# Data Classes of Concepts in HPO that are being processed
+# =============================================================================
 
 labelClass                      = "label"
 definitionClass                 = "definition"
 commentClass                    = "comment"
-exactSynonymClass               = "exactSynonym"
-enrichedSourceExactSynonymClass = "sourceArtificialSynonym"
+referenceClass                  = "reference"
+
+exactSynonymClass               = "exact"
+relatedSynonymClass             = "related"
+broadSynonymClass               = "broad"
+narrowSynonymClass              = "narrow"
+
+synonymClasses = [exactSynonymClass, relatedSynonymClass, broadSynonymClass, narrowSynonymClass]
+
+laypersonSynonymType            = "layperson"
+abbreviationSynonymType         = "abbreviation"
+obsoleteSynonymType             = "obsolete"
+pluralFormSynonymType           = "plural"
+ukSpellingSynonymType           = "uk"
+allelicRequirementSynonymType   = "allelic"
+# In OWL Class Section, rather than in Axiom Section.
+directSynonymType               = "direct"
+
 childrenClass                   = "child"
-enrichedSourceDefinitionClass   = "sourceArtificialDefinition"
+
+enrichedSourceExactSynonymClass = "generatedSynonym"
+enrichedSourceDefinitionClass   = "generatedDefinition"
+
+goldStandardSystem              = "gold"
+
+owlSourceExactSynonym                   = "hasExactSynonym"
+owlSourceRelatedSynonym                 = "hasRelatedSynonym"
+owlSourceBoradSynonym                   = "hasBroadSynonym"
+owlSourceNarrowSynonym                  = "hasNarrowSynonym"
+
+owlSourceSynonymTypeLayperson           = "layperson"
+owlSourceSynonymTypeAbbreviation        = "abbreviation"
+owlSourceSynonymTypeObsolete            = "obsolete_synonym"
+owlSourceSynonymTypePlural              = "plural_form"
+owlSourceSynonymTypeUKSpelling          = "uk_spelling"
+owlSourceSynonymTypeAllelic             = "allelic_requirement"
+
+# =============================================================================
+# Folder structure
+# =============================================================================
 
 # Basic Data Directory.
 dataDir = "../data"
 
-logFile = f"{dataDir}/hpot.log"
-logFilePrompts = f"{dataDir}/prompts.log"
+inputFolderName                     = "input"
+outputFolderName                    = "output"
+logFolderName                       = "logs"
 
-postfix = model_id[model_id.index("/") + 1:]
+# Multi-Step 
+outputFolderNameTransformed         = "transformed"
+outputFolderNameGenerated           = "generated"
+outputFolderNameFormatted           = "formatted"
+outputFolderNameMerged              = "merged"
+outputFolderNameGold                = "gold"
+outputFolderNamePlot                = "img"
 
-inputFile = f"{dataDir}/input/hpo.data.pkl"
-outputFileRawGenerated = f"{dataDir}/output/{generateTimes}raw_generated{postfix}.pkl"
-outputFileGenerated = f"{dataDir}/output/{generateTimes}generated{postfix}.csv"
-outputFileGold = f"{dataDir}/output/gold.csv"
-outputFileGeneratedEmbeddings = f"{dataDir}/output/{generateTimes}generatedembeddings{postfix}.csv"
-outputFileGoldEmbeddings = f"{dataDir}/output/goldembeddings.csv"
+# Contains all Information of the hp.owl needed to Generate Synonyms and perform
+# the Evaluation.
+outputFileNameTransformed           = "transformed.pkl"
+# Contains the plain Outputed Generated Synonyms of the Model. 
+outputFileNameGenerated             = f"generated_{generateTimes}_{model_name}.pkl"
+# Contains the formatted Generated Synonyms of the Model. 
+outputFileNameFormattedPrefix       = "formatted_terms_"
+outputFileNameFormattedEmbeddingsprefix = "formatted_embeddings_"
+outputFileNameFormatted             = f"{outputFileNameFormattedPrefix}{generateTimes}_{model_name}.csv"
+outputFileNameFormattedEmbeddings   = f"{outputFileNameFormattedEmbeddingsprefix}{generateTimes}_{model_name}.csv"
+# Contains the formatted Generated Synonyms of all Models. 
+outputFileNameMergedTerms           = f"merged_terms_{generateTimes}.csv"
+# Contains the Embeddings of the formatted Generated Synonyms of all Models. 
+outputFileNameMergedEmbeddings      = f"merged_embeddings_{generateTimes}.csv"
 
-sourceSynonymExampleResult = [
-    [
-        "Apple", 
-        "Banana", 
-        "Pineapple",
-        "Peach"
-    ], [
-        "Pepper",
-        "Eggplant",
-        "Cucumber",
-        "Tomato"
-    ], [
-        "Blueberry",
-        "Strawberry",
-        "Blackberry",
-        "Raspberry"
-    ]
-]
+outputFileNameGold                  = "gold.csv"
+outputFileNameGoldEmbeddings        = "gold_embeddings.csv"
+
+outputFileNameDistinctSynonymsRound = "distinct_synonyms_per_round.png"
+outputFileNameDistinctSynonymsConcept = "distinct_synonyms_per_concept.png"
+outputFileNameNewSynonymsRound      = "new_synonyms_per_round.png"
+outputFileNameCumulativeRecallPrecision = "cumulative_recall_precision.png"
+outputFileNameRecallPrecisionF1Appearance = "appearance_recall_precision_f1_count.png"
+outputFileNameCumulativeRecallPrecisionTotal = "cumulative_recall_precision_total.png"
+outputFileNameRecallPrecisionF1AppearanceTotal = "appearance_recall_precision_f1_count_total.png"
+
+# The Input Folders of each Step
+inputFolderNameTransformed          = inputFolderName
+inputFolderNameGenerated            = outputFolderNameTransformed
+inputFolderNameFormatted            = outputFolderNameGenerated
+inputFolderNameMerged               = outputFolderNameFormatted
+inputFolderNameEvaluated            = outputFolderNameMerged
+
+# The Input File Names of each Step
+inputFileNameTransformed            = "hp.owl"
+inputFileNameGenerated              = outputFileNameTransformed
+inputFileNameFormatted              = outputFileNameGenerated
+inputFileNameMerged                 = outputFileNameFormatted
+inputFileNameEvaluatedTerms         = outputFileNameMergedTerms
+inputFileNameEvaluatedEmbeddings    = outputFileNameMergedEmbeddings
+
+logFileName                         = f"syngen_{model_name}.log"
+logFilePromptsName                  = f"prompts_{model_name}.log"
+
+# =============================================================================
+
+logFile                     = os.path.join(
+    dataDir,
+    logFolderName,
+    logFileName
+)
+
+logFilePrompts              = os.path.join(
+    dataDir,
+    logFolderName,
+    logFilePromptsName
+)
+
+inputFileTransformed        = os.path.join(
+    dataDir,
+    inputFolderName,
+    inputFileNameTransformed
+)
+
+outputFileTransformed       = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameTransformed,
+    outputFileNameTransformed
+)
+
+inputFileGenerated          = outputFileTransformed
+
+outputFileGenerated         = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameGenerated,
+    outputFileNameGenerated
+)
+
+outputFileGold              = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameGold,
+    outputFileNameGold
+)
+
+outputFileGoldEmbeddings    = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameGold,
+    outputFileNameGoldEmbeddings
+)
+
+inputFileFormatted          = outputFileGenerated
+
+outputFileFormatted         = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameFormatted,
+    outputFileNameFormatted
+)
+
+outputFileFormattedEmbeddings = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameFormatted,
+    outputFileNameFormattedEmbeddings
+)
+
+inputFolderFormatted       = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameFormatted
+)
+
+outputFileMergedTerms       = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameMerged,
+    outputFileNameMergedTerms
+)
+
+outputFileMergedEmbeddings  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameMerged,
+    outputFileNameMergedEmbeddings
+)
+
+inputFileEvaluatedTerms         = outputFileMergedTerms
+inputFileEvaluatedGold          = outputFileGold
+inputFileEvaluatedEmbeddings    = outputFileMergedEmbeddings
+
+
+outputFileDistinctSynonymsRound  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNamePlot,
+    outputFileNameDistinctSynonymsRound
+)
+
+outputFileDistinctSynonymsConcept  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNamePlot,
+    outputFileNameDistinctSynonymsConcept
+)
+
+outputFileNewSynonymsRound  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNamePlot,
+    outputFileNameNewSynonymsRound
+)
+
+outputFileCumulativeRecallPrecision  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNamePlot,
+    outputFileNameCumulativeRecallPrecision
+)
+
+outputFileRecallPrecisionF1Appearance  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNamePlot,
+    outputFileNameRecallPrecisionF1Appearance
+)
+
+outputFileCumulativeRecallPrecisionTotal  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNamePlot,
+    outputFileNameCumulativeRecallPrecisionTotal
+)
+
+outputFileRecallPrecisionF1AppearanceTotal  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNamePlot,
+    outputFileNameRecallPrecisionF1AppearanceTotal
+)
+
+# =============================================================================
 
 testIDs = list(set([
     'HP:0001756', 'HP:0003189', 'HP:0000708', 'HP:0008069', 'HP:0009778',
-    'HP:0008331', 'HP:0007165', 'HP:0002020', 'HP:0010759', 'HP:0002659']))
-""",
+    'HP:0008331', 'HP:0007165', 'HP:0002020', 'HP:0010759', 'HP:0002659',
     'HP:0009891', 'HP:0007018', 'HP:0032514', 'HP:0000434', 'HP:0000692', 
     'HP:0025675', 'HP:0001511', 'HP:0000286', 'HP:0000448', 'HP:0000691', 
     'HP:0001092', 'HP:0001315', 'HP:0000683', 'HP:0000252', 'HP:0000239', 
@@ -225,4 +440,4 @@ testIDs = list(set([
     'HP:0004313', 'HP:0001635', 'HP:0002553', 'HP:0007378', 'HP:0002750', 
     'HP:0001852', 'HP:0007968', 'HP:0000592', 'HP:0009843', 'HP:0005272',
     'HP:0004331', 'HP:0011153', 'HP:0003155', 'HP:0000437'
-]))"""
+]))

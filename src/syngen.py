@@ -15,7 +15,7 @@ printHeader(f"Enrich Concepts with Synonyms")
 
 # Load the dataset from a pickle file
 log("Loading data...")
-data = readPickle(inputFile)
+data = readPickle(inputFileNameGenerated)
 log("Data loaded.")
 
 parents = {}
@@ -35,21 +35,14 @@ lostByFilter = len(data.index)
 data = data[data[hpoidColumn].isin(testIDs)]
 log(f"Removed {lostByFilter - len(data.index)} entries.")
 
-log("Removing empty data...")
-data, lostByFilter = removeEmptyRows(data=data)
-log(f"Removed {lostByFilter} entries.")
-
-log(f"Left with {len(data.index)} entries.")
-
-log("Adding Definitions.")
+log("Adding Definitions...")
 
 logging.getLogger("vllm").setLevel(logging.ERROR)
 
 log(f"Set up the LLM ({model_id})...")
 model = Model(model=model_id)
 
-definitions = data.loc[(data[languageColumn] == "en") & 
-            (data[classColumn] == definitionClass), hpoidColumn].tolist()
+definitions = data.loc[data[classColumn] == definitionClass, hpoidColumn].tolist()
 
 log(f"Found {len(definitions)}/{len(testIDs)} English definitions.")
 
@@ -103,16 +96,15 @@ if (len(definitions) < len(testIDs)):
             progress.update(task, advance=1)
 
     formattedDefinition = pd.DataFrame({
-        languageColumn  : ["en"] * len(definitionTexts),
         contentColumn   : definitionTexts,
         classColumn     : [enrichedSourceDefinitionClass] * len(definitionTexts),
-        hpoidColumn     : noDefinitions
+        hpoidColumn     : noDefinitions,
+        typeColumn      : [""] * len(definitionTexts),
+        systemColumn    : [model_name] * len(definitionTexts),
+        roundColumn     : [-1] * len(definitionTexts)
     })
 
-    data = pd.concat([data, formattedDefinition])
-
-    # Reset index after cleaning
-    data = data.reset_index(drop=True)
+    data = pd.concat([data, formattedDefinition]).reset_index(drop=True)
 
     model.logPrompts()
     model.reset()
@@ -130,8 +122,8 @@ with newProgress() as progress:
     for hpoID in testIDs:
         for _ in range(0, generateTimes):
             messages.append(getAlternativeComplexPrompt1(
-                "".join(getElements(data, hpoID, [labelClass], "en")),
-                "".join(getElements(data, hpoID, [definitionClass, enrichedSourceDefinitionClass], "en")),
+                "".join(getElements(data, hpoID, [labelClass])),
+                "".join(getElements(data, hpoID, [definitionClass, enrichedSourceDefinitionClass])),
                 parents[hpoID],
                 children[hpoID]
             ))
@@ -179,27 +171,24 @@ with newProgress() as progress:
 
             progress.update(task, advance=1)
 
-log("Saving generated text...")
 result = pd.DataFrame({
     contentColumn   : generatedText, 
     hpoidColumn     : generatedTextHPOid, 
     roundColumn     : generatedRound,
     classColumn     : [enrichedSourceExactSynonymClass] * len(generatedRound),
-    languageColumn  : ["en"]                            * len(generatedRound),
     systemColumn    : [model_id]                        * len(generatedRound),
+    typeColumn      : [""]                              * len(generatedRound)
 })
-result.to_pickle(outputFileRawGenerated)
-log("Saved generated text.")
+writePickle(result, outputFileGenerated)
 
 if not os.path.exists(outputFileGold):
     log("Creating gold standard file...")
-    gold = data[((data[classColumn] == labelClass) | (data[classColumn] == exactSynonymClass)) & (data[languageColumn] == "en")]
-    if "source" in gold.columns:
-        gold = gold.drop(['source'], axis=1)
-    gold = gold.drop_duplicates(ignore_index=True).reset_index(drop=True)
+    
+    gold = data[((data[classColumn] == labelClass) | (data[classColumn].isin(synonymClasses)))].drop_duplicates(ignore_index=True).reset_index(drop=True)
     gold.to_csv(outputFileGold)
+    
     log("Created gold standard file.")
 else:
     log("Gold standard file found, nothing to create.")
 
-log("Task completed.")
+printHeader("Generation of Synonyms completed")
