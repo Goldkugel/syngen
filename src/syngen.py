@@ -7,47 +7,55 @@ import logging
 sys.dont_write_bytecode = True
 
 # Import necessary modules and configuration settings
-from prompts import *
-from model import *
-from utils import *
+from prompts    import *
+from model      import *
+from utils      import *
 
 printHeader(f"Enrich Concepts with Synonyms")
 
+# Only proceed if formatted input data exists
+exitIfFileNotExist(inputFileGeneration)
+
 # Load the dataset from a pickle file
-log("Loading data...")
-data = readPickle(inputFileNameGenerated)
+log(f"Loading data from \"{os.path.basename(inputFileGeneration)}\"...")
+data    = pd.read_csv(inputFileGeneration)
 log("Data loaded.")
 
-parents = {}
-children = {}
+hpoIDs  = list(set(data[hpoidColumn]))
+if reduceToTestIDs:
+    hpoIDs = testIDs
+log(f"Identified {len(hpoIDs)} HPO concepts.")
+
+parents     = {}
+children    = {}
 
 with newProgress() as progress:
 
-    task = newTask(progress, len(testIDs), "Get Parents and Children")
-
-    for hpoID in testIDs:
+    task    = newTask(progress, len(set(data[hpoidColumn])), 
+        "Get Parents and Children")
+    
+    for hpoID in hpoIDs:
         children[hpoID] = getChildLabels(data, hpoID)
-        parents[hpoID] = getParentLabels(data, hpoID)
+        parents[hpoID]  = getParentLabels(data, hpoID)
         progress.update(task, advance=1)
 
-log("Removing unnecessary data...")
-lostByFilter = len(data.index)
-data = data[data[hpoidColumn].isin(testIDs)]
-log(f"Removed {lostByFilter - len(data.index)} entries.")
+    progress.refresh()
 
 log("Adding Definitions...")
 
 logging.getLogger("vllm").setLevel(logging.ERROR)
 
-log(f"Set up the LLM ({model_id})...")
-model = Model(model=model_id)
+log(f"Set up the LLM (\"{model_id}\")...")
+model = Model(model = model_id)
 
-definitions = data.loc[data[classColumn] == definitionClass, hpoidColumn].tolist()
+definitions = data.loc[
+    data[classColumn] == definitionClass, 
+    hpoidColumn].tolist()
 
-log(f"Found {len(definitions)}/{len(testIDs)} English definitions.")
+log(f"Found {len(definitions)} / {len(hpoIDs)} definitions.")
 
-if (len(definitions) < len(testIDs)):
-    noDefinitions = testIDs.copy()
+if (len(definitions) < len(hpoIDs)):
+    noDefinitions = hpoIDs.copy()
 
     for hpoID in definitions:
         noDefinitions.remove(hpoID)
@@ -57,7 +65,9 @@ if (len(definitions) < len(testIDs)):
     messages = []
 
     for hpoID in noDefinitions:
-        messages.append(getPreTaskPart1("".join(getElements(data, hpoID, labelClass))))
+        messages.append(getPreTaskPart1(
+            "".join(getElements(data, hpoID, labelClass))
+        ))
 
     log(f"{model.addPrompt(userRole, messages)} prompts added to " \
         "the model. Start generating responses...")
@@ -95,16 +105,22 @@ if (len(definitions) < len(testIDs)):
                 replace("\n", "").strip())
             progress.update(task, advance=1)
 
+        progress.refresh()
+
     formattedDefinition = pd.DataFrame({
         contentColumn   : definitionTexts,
-        classColumn     : [enrichedSourceDefinitionClass] * len(definitionTexts),
+        classColumn     : [enrichedSourceDefinitionClass] 
+            * len(definitionTexts),
         hpoidColumn     : noDefinitions,
-        typeColumn      : [""] * len(definitionTexts),
-        systemColumn    : [model_name] * len(definitionTexts),
-        roundColumn     : [-1] * len(definitionTexts)
+        typeColumn      : [""]                              
+            * len(definitionTexts),
+        systemColumn    : [model_name]                      
+            * len(definitionTexts),
+        roundColumn     : [-1]                              
+            * len(definitionTexts)
     })
 
-    data = pd.concat([data, formattedDefinition]).reset_index(drop=True)
+    data = pd.concat([data, formattedDefinition]).reset_index(drop = True)
 
     model.logPrompts()
     model.reset()
@@ -117,17 +133,21 @@ messages = []
 
 with newProgress() as progress:
 
-    task = newTask(progress, len(testIDs) * generateTimes, "Set System Prompt")
+    task = newTask(progress, len(hpoIDs) * generateTimes, "Creating Prompts")
 
-    for hpoID in testIDs:
+    for hpoID in hpoIDs:
         for _ in range(0, generateTimes):
             messages.append(getAlternativeComplexPrompt1(
                 "".join(getElements(data, hpoID, [labelClass])),
-                "".join(getElements(data, hpoID, [definitionClass, enrichedSourceDefinitionClass])),
+                "".join(getElements(data, hpoID, [definitionClass, 
+                    enrichedSourceDefinitionClass])),
+                "".join(getElements(data, hpoID, [commentClass])),
                 parents[hpoID],
                 children[hpoID]
             ))
             progress.update(task, advance=1)
+
+    progress.refresh()
 
 addedPrompts = model.addPrompt(userRole, messages)
 log(f"{addedPrompts} prompts added. Start generating responses...")
@@ -160,16 +180,22 @@ generatedRound          = [0]   * len(messagesHistories)
 with newProgress() as progress:
     task = newTask(progress, len(messagesHistories), "Processing Synonyms")
     
-    for hpoID in testIDs:
+    for hpoID in hpoIDs:
 
-        index = testIDs.index(hpoID)
+        index = hpoIDs.index(hpoID)
         for t in range(0, generateTimes):
-            generatedTextHPOid[index * generateTimes + t]   = hpoID
-            messagesHistory                                 = messagesHistories[index * generateTimes + t]
-            generatedText[index * generateTimes + t]        = str(messagesHistory[-1][messageTextElement])
-            generatedRound[index * generateTimes + t]       = t + 1
+            generatedTextHPOid[index * generateTimes + t]   = \
+                hpoID
+            messagesHistory                                 = \
+                messagesHistories[index * generateTimes + t]
+            generatedText[index * generateTimes + t]        = \
+                str(messagesHistory[-1][messageTextElement])
+            generatedRound[index * generateTimes + t]       = \
+                t + 1
 
             progress.update(task, advance=1)
+
+    progress.refresh()
 
 result = pd.DataFrame({
     contentColumn   : generatedText, 
@@ -179,16 +205,20 @@ result = pd.DataFrame({
     systemColumn    : [model_id]                        * len(generatedRound),
     typeColumn      : [""]                              * len(generatedRound)
 })
-writePickle(result, outputFileGenerated)
+result.to_csv(outputFileGeneration, index = False)
 
-if not os.path.exists(outputFileGold):
+if not os.path.exists(outputFileGenerationGold):
     log("Creating gold standard file...")
     
-    gold = data[((data[classColumn] == labelClass) | (data[classColumn].isin(synonymClasses)))].drop_duplicates(ignore_index=True).reset_index(drop=True)
-    gold.to_csv(outputFileGold)
+    gold = data[((
+            data[classColumn] == labelClass
+        ) | (
+            data[classColumn].isin(synonymClasses)
+        ))].drop_duplicates(ignore_index = True).reset_index(drop = True)
+    gold.to_csv(outputFileGenerationGold)
     
     log("Created gold standard file.")
 else:
     log("Gold standard file found, nothing to create.")
 
-printHeader("Generation of Synonyms completed")
+printHeader("Generation of Synonyms completed.")

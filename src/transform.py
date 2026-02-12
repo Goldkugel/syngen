@@ -2,6 +2,7 @@ from owlready2 import get_ontology
 
 import pandas as pd
 import sys
+import time
 
 # Prevent Python from generating .pyc files
 sys.dont_write_bytecode = True
@@ -16,11 +17,14 @@ from utils  import *
 
 printHeader("Transforming the Raw HPO Data")
 
+# To track time.
+start_time = time.time()
+
 # ------------------------------------------------------------------------------
 # Load Human Phenotype Ontology (HPO) from OWL file
 # ------------------------------------------------------------------------------
 
-# Ensure the transformed input file exists before proceeding
+# Ensure the input file exists before proceeding.
 exitIfFileNotExist(inputFileTransformed)
 
 # Load the ontology from the OWL file
@@ -75,8 +79,8 @@ log("Merging Data...")
 # Combine all DataFrames, remove duplicates, and reset the index
 data = (
     pd.concat(data)
-      .drop_duplicates(inplace=False, ignore_index=True)
-      .reset_index(drop=True)
+      .drop_duplicates(inplace = False, ignore_index = True)
+      .reset_index(drop = True)
 )
 
 log(f"Merging resulted in {len(data.index)} Lines of Data.")
@@ -91,74 +95,87 @@ log("Removing Empty Content Rows...")
 # Remove rows where the content column is empty or NaN
 data = (
     data[data[contentColumn] != ""]
-    .dropna(subset=[contentColumn])
-    .reset_index(drop=True)
+    .dropna(subset = [contentColumn])
+    .reset_index(drop = True)
 )
 
 log(f"Removed {rowCount - len(data.index)} Rows due to Empty Content.")
+
+printRowCount(data)
+printDataSummary(data)
+
+log(f"Write full transformated Data into \"{os.path.basename(outputFileTransformedFull)}\"...")
+data.to_csv(outputFileTransformedFull, index = False)
+log("Full transformed Data written.")
 
 # ------------------------------------------------------------------------------
 # Filter data to keep only selected HPO concepts
 # ------------------------------------------------------------------------------
 
-rowCount = len(data.index)
-log("Keep only selected HPO Concepts...")
+if len(testIDs) > 0:
+    log("Creating a reduced set of HPO Concepts...")
 
-result = []
+    rowCount = len(data.index)
 
-# Collect all unique HPO IDs currently present
-hpoIDs = list(set(data[hpoidColumn]))
+    # If test IDs are provided, limit the data to:
+    # - the test IDs themselves
+    # - their children
+    # - their parents
+    if testIDs is not None and len(testIDs) > 0:
+        parentIDs = data.loc[
+            (data[contentColumn].isin(testIDs)) &
+            (data[classColumn] == childrenClass),
+            hpoidColumn
+        ].tolist()
 
-# If test IDs are provided, limit the data to:
-# - the test IDs themselves
-# - their children
-# - their parents
-if testIDs is not None and len(testIDs) > 0:
-    parentIDs = data.loc[
-        (data[contentColumn].isin(testIDs)) &
-        (data[classColumn] == childrenClass),
-        hpoidColumn
-    ].tolist()
+        childIDs = data.loc[
+            (data[hpoidColumn].isin(testIDs)) &
+            (data[classColumn] == childrenClass),
+            contentColumn
+        ].tolist()
 
-    childIDs = data.loc[
-        (data[hpoidColumn].isin(testIDs)) &
-        (data[classColumn] == childrenClass),
-        contentColumn
-    ].tolist()
+        hpoIDs = list(set(testIDs + childIDs + parentIDs))
 
-    hpoIDs = list(set(testIDs + childIDs + parentIDs))
+    # ------------------------------------------------------------------------------
+    # Reduce content to only the selected HPO concepts
+    # ------------------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------
-# Reduce content to only the selected HPO concepts
-# ------------------------------------------------------------------------------
+    result = []
 
-# Use a progress bar to track processing of each HPO ID
-with newProgress() as progress:
-    task = newTask(progress, len(hpoIDs), "Reduce Content")
+    # Use a progress bar to track processing of each HPO ID
+    with newProgress() as progress:
+        task = newTask(progress, len(hpoIDs), "Reduce Content")
 
-    for hpoID in hpoIDs:
-        # Collect all relevant entries for the given HPO ID
-        result.append(checkEntries(data, hpoID))
-        progress.update(task, advance=1)
+        for hpoID in hpoIDs:
+            # Collect all relevant entries for the given HPO ID
+            result.append(checkEntries(data, hpoID))
+            progress.update(task, advance = 1)
 
-# Merge reduced content back into a single DataFrame
-log("Merging Data...")
-data = pd.concat(result).reset_index(drop=True)
+        progress.refresh()
 
-log(f"Content Reduced by {rowCount - len(data.index)} Rows.")
+    # Merge reduced content back into a single DataFrame
+    log("Merging Data...")
+    data = pd.concat(result).reset_index(drop = True)
+    log(f"Content Reduced by {rowCount - len(data.index)} Rows.")
 
-# ------------------------------------------------------------------------------
-# Output summary statistics
-# ------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
+    # Output summary statistics
+    # ------------------------------------------------------------------------------
 
-printRowCount(data)
-printDataSummary(data)
+    printRowCount(data)
+    printDataSummary(data)
 
-# ------------------------------------------------------------------------------
-# Persist transformed data to disk
-# ------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
+    # Persist transformed data to disk
+    # ------------------------------------------------------------------------------
 
-# Save the final DataFrame as a pickle file
-writePickle(data, outputFileTransformed)
+    log(f"Write reduced transformated Data into \"{os.path.basename(outputFileTransformed)}\"...")
+    # Save the final DataFrame as a pickle file
+    data.to_csv(outputFileTransformed, index = False)
+    log("Reduced transformed Data written.")
 
-printHeader("Transforming completed")
+end_time = time.time()
+elapsed_seconds = end_time - start_time
+minutes = int(elapsed_seconds // 60)
+
+printHeader(f"Transforming completed [Minutes: {minutes}]")

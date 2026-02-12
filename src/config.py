@@ -4,7 +4,11 @@ import sys
 # Prevent Python from generating .pyc files (compiled bytecode files)
 sys.dont_write_bytecode = True
 
-generateTimes = 100
+generateTimes = 300
+
+generateEmbeddings = False
+
+reduceToTestIDs = False
 
 # =============================================================================
 # Model Configuration
@@ -16,13 +20,17 @@ generateTimes = 100
 #model_id = "google/medgemma-27b-text-it"
 #model_id = "meta-llama/Llama-3.3-70B-Instruct"
 
-model_id = "google/medgemma-27b-text-it"
+model_id = ""
+# model_id = "google/medgemma-4b-it"
 if len(sys.argv) > 1 and sys.argv[1][0] != "-":
     model_id = sys.argv[1]
 model_name = model_id[model_id.index("/") + 1:]
 
-#gpu_id = "7"
-gpu_id = "4,5,6,7"
+embedding_model_id = "abhinand/MedEmbed-large-v0.1"
+
+# gpu_id = "7"
+gpu_id = "5,6"
+# gpu_id = "0,1,2,3"
 if len(sys.argv) > 2:
     gpu_id = sys.argv[2]
 
@@ -36,7 +44,7 @@ max_num_batched_tokens = 2 * max_model_len
 # Float that controls the randomness of the sampling. Lower values make the 
 # model more deterministic, while higher values make the model more random. 
 # Zero means greedy sampling.
-temperature = 0.99
+temperature = 0.01
 
 # Maximum number of tokens to generate per output sequence.
 max_tokens = 2 * 2048
@@ -69,6 +77,8 @@ startTag = "<"
 endTag = ">"
 bar = "|"
 
+unusedTokens = "<unused95>"
+
 # For Gemma
 startTurn = f"{startTag}{startTurnID}{endTag}"
 endTurn = f"{startTag}{endTurnID}{endTag}"
@@ -96,12 +106,14 @@ progressBarTextLength = 40
 sourceLanguageShort = "en"
 sourceLanguage      = "English"
 
-hpoidColumn     = "hpoID"
-classColumn     = "class"
-typeColumn      = "type"
-contentColumn   = "content"
-systemColumn    = "system"
-roundColumn     = "round"
+hpoidColumn      = "hpoID"
+classColumn      = "class"
+typeColumn       = "type"
+contentColumn    = "content"
+systemColumn     = "system"
+roundColumn      = "round"
+answerColumn     = "answer"
+similarityColumn = "similarity"
 
 # =============================================================================
 # Data Classes of Concepts in HPO that are being processed
@@ -119,6 +131,7 @@ narrowSynonymClass              = "narrow"
 
 synonymClasses = [exactSynonymClass, relatedSynonymClass, broadSynonymClass, narrowSynonymClass]
 
+expertSynonymType               = "expert"
 laypersonSynonymType            = "layperson"
 abbreviationSynonymType         = "abbreviation"
 obsoleteSynonymType             = "obsolete"
@@ -127,6 +140,7 @@ ukSpellingSynonymType           = "uk"
 allelicRequirementSynonymType   = "allelic"
 # In OWL Class Section, rather than in Axiom Section.
 directSynonymType               = "direct"
+undefinedSynonymType            = "undefined"
 
 childrenClass                   = "child"
 
@@ -147,70 +161,45 @@ owlSourceSynonymTypePlural              = "plural_form"
 owlSourceSynonymTypeUKSpelling          = "uk_spelling"
 owlSourceSynonymTypeAllelic             = "allelic_requirement"
 
+precisionLabel  = "precision"
+recallLabel     = "recall"
+accuracyLabel   = "accuracy"
+f1ScoreLabel    = "f1"
+
 # =============================================================================
 # Folder structure
 # =============================================================================
 
+csvFileFormat = "csv"
+pickleFileFormat = "pkl"
+logFileFormat = "log"
+plotFileFormat = "png"
+
 # Basic Data Directory.
 dataDir = "../data"
 
+# Basic Data Subdirectories.
 inputFolderName                     = "input"
 outputFolderName                    = "output"
 logFolderName                       = "logs"
 
-# Multi-Step 
-outputFolderNameTransformed         = "transformed"
-outputFolderNameGenerated           = "generated"
-outputFolderNameFormatted           = "formatted"
-outputFolderNameMerged              = "merged"
+# Basic Data Processing Directories.
+# First step.
+outputFolderNameTransformed         = "transform"
+# The second Step is the actual job e.g. generation or classification.
+# Third step.
+outputFolderNameFormatted           = "format"
+# Fourth step.
+outputFolderNameMerged              = "merge"
+# The gold standards are saved here, might not be necessary.
 outputFolderNameGold                = "gold"
-outputFolderNamePlot                = "img"
+# Fifth step.
+outputFolderNameEvaluation          = "evaluate"
 
-# Contains all Information of the hp.owl needed to Generate Synonyms and perform
-# the Evaluation.
-outputFileNameTransformed           = "transformed.pkl"
-# Contains the plain Outputed Generated Synonyms of the Model. 
-outputFileNameGenerated             = f"generated_{generateTimes}_{model_name}.pkl"
-# Contains the formatted Generated Synonyms of the Model. 
-outputFileNameFormattedPrefix       = "formatted_terms_"
-outputFileNameFormattedEmbeddingsprefix = "formatted_embeddings_"
-outputFileNameFormatted             = f"{outputFileNameFormattedPrefix}{generateTimes}_{model_name}.csv"
-outputFileNameFormattedEmbeddings   = f"{outputFileNameFormattedEmbeddingsprefix}{generateTimes}_{model_name}.csv"
-# Contains the formatted Generated Synonyms of all Models. 
-outputFileNameMergedTerms           = f"merged_terms_{generateTimes}.csv"
-# Contains the Embeddings of the formatted Generated Synonyms of all Models. 
-outputFileNameMergedEmbeddings      = f"merged_embeddings_{generateTimes}.csv"
-
-outputFileNameGold                  = "gold.csv"
-outputFileNameGoldEmbeddings        = "gold_embeddings.csv"
-
-outputFileNameDistinctSynonymsRound = "distinct_synonyms_per_round.png"
-outputFileNameDistinctSynonymsConcept = "distinct_synonyms_per_concept.png"
-outputFileNameNewSynonymsRound      = "new_synonyms_per_round.png"
-outputFileNameCumulativeRecallPrecision = "cumulative_recall_precision.png"
-outputFileNameRecallPrecisionF1Appearance = "appearance_recall_precision_f1_count.png"
-outputFileNameCumulativeRecallPrecisionTotal = "cumulative_recall_precision_total.png"
-outputFileNameRecallPrecisionF1AppearanceTotal = "appearance_recall_precision_f1_count_total.png"
-
-# The Input Folders of each Step
-inputFolderNameTransformed          = inputFolderName
-inputFolderNameGenerated            = outputFolderNameTransformed
-inputFolderNameFormatted            = outputFolderNameGenerated
-inputFolderNameMerged               = outputFolderNameFormatted
-inputFolderNameEvaluated            = outputFolderNameMerged
-
-# The Input File Names of each Step
-inputFileNameTransformed            = "hp.owl"
-inputFileNameGenerated              = outputFileNameTransformed
-inputFileNameFormatted              = outputFileNameGenerated
-inputFileNameMerged                 = outputFileNameFormatted
-inputFileNameEvaluatedTerms         = outputFileNameMergedTerms
-inputFileNameEvaluatedEmbeddings    = outputFileNameMergedEmbeddings
-
-logFileName                         = f"syngen_{model_name}.log"
-logFilePromptsName                  = f"prompts_{model_name}.log"
-
-# =============================================================================
+logFileName                         = f"syngen_{model_name}.{logFileFormat}"
+if model_name == "":
+    logFileName                         = f"syngen.{logFileFormat}"
+logFilePromptsName                  = f"prompts_{model_name}.{logFileFormat}"
 
 logFile                     = os.path.join(
     dataDir,
@@ -224,136 +213,375 @@ logFilePrompts              = os.path.join(
     logFilePromptsName
 )
 
+# The Input Folders of each Step
+inputFolderNameTransformed          = inputFolderName
+
+inputFileNameTransformed            = "hp.owl"
+
 inputFileTransformed        = os.path.join(
     dataDir,
     inputFolderName,
     inputFileNameTransformed
 )
 
-outputFileTransformed       = os.path.join(
+# Contains all Information of the hp.owl needed to Generate and Classify 
+# Synonyms and perform the Evaluation.
+outputFileNameTransformedFull       = f"transform.{csvFileFormat}"
+
+outputFileTransformedFull                     = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameTransformed,
+    outputFileNameTransformedFull
+)
+
+# Reduction to Test HPO IDs listed at the bottom for engineering purposes.
+outputFileNameTransformed           = f"transform.reduced.{csvFileFormat}"
+
+outputFileTransformed                        = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameTransformed,
     outputFileNameTransformed
 )
 
-inputFileGenerated          = outputFileTransformed
+# =============================================================================
+# Files for Synonym Generation
+# =============================================================================
 
-outputFileGenerated         = os.path.join(
-    dataDir,
+outputFolderNameGeneration                                  = "generation"
+
+
+
+# Contains the plain Outputed Generated Synonyms of the Model. Since more
+# models can be used for Generation, the files need to contain the model name.
+# The generation times plays a role as well.
+inputFileGeneration                                         = outputFileTransformed if reduceToTestIDs else outputFileTransformedFull
+
+outputFileNameGeneration                                    = f"{outputFolderNameGeneration}_{generateTimes}_{model_name}.{csvFileFormat}"
+outputFileGeneration                                        = os.path.join(
+    dataDir,        
     outputFolderName,
-    outputFolderNameGenerated,
-    outputFileNameGenerated
+    outputFolderNameGeneration,
+    outputFileNameGeneration
 )
 
-outputFileGold              = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameGold,
-    outputFileNameGold
-)
+inputFileGenerationFormatted                                = outputFileGeneration
 
-outputFileGoldEmbeddings    = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameGold,
-    outputFileNameGoldEmbeddings
-)
+outputFileNameGenerationFormattedPrefix                     = f"{outputFolderNameGeneration}_formatted_terms_{generateTimes}"
+outputFileNameGenerationFormattedEmbeddingsPrefix           = f"{outputFolderNameGeneration}_formatted_embeddings_{generateTimes}"
 
-inputFileFormatted          = outputFileGenerated
-
-outputFileFormatted         = os.path.join(
+outputFileNameGenerationFormatted                           = f"{outputFileNameGenerationFormattedPrefix}_{model_name}.{csvFileFormat}"
+outputFileGenerationFormatted                               = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameFormatted,
-    outputFileNameFormatted
+    outputFileNameGenerationFormatted
 )
 
-outputFileFormattedEmbeddings = os.path.join(
+outputFileNameGenerationFormattedEmbeddings                 = f"{outputFileNameGenerationFormattedEmbeddingsPrefix}_{model_name}.{csvFileFormat}"
+outputFileGenerationFormattedEmbeddings                     = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameFormatted,
-    outputFileNameFormattedEmbeddings
+    outputFileNameGenerationFormattedEmbeddings
 )
 
-inputFolderFormatted       = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameFormatted
-)
+inputFileNameGenerationMerged                               = [
+    file
+    for file in os.listdir(os.path.join(dataDir, outputFolderName, outputFolderNameFormatted))
+    if file.startswith(outputFileNameGenerationFormattedPrefix) and file.endswith(csvFileFormat)
+]
+inputFileGenerationMerged                                   = [
+    os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameGenerationMerged
+]
 
-outputFileMergedTerms       = os.path.join(
+inputFileNameGenerationMergedEmbeddings                     = [
+    file
+    for file in os.listdir(os.path.join(dataDir, outputFolderName, outputFolderNameFormatted))
+    if file.startswith(outputFileNameGenerationFormattedEmbeddingsPrefix) and file.endswith(csvFileFormat)
+]
+inputFileGenerationMergedEmbeddings                         = [
+    os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameGenerationMergedEmbeddings
+]
+
+# Contains the formatted Generated Synonyms of all Models. 
+outputFileNameGenerationMerged                              = f"{outputFolderNameGeneration}_merged_terms_{generateTimes}.{csvFileFormat}"
+outputFileGenerationMerged                                  = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameMerged,
-    outputFileNameMergedTerms
+    outputFileNameGenerationMerged
 )
 
-outputFileMergedEmbeddings  = os.path.join(
+# Contains the Embeddings of the formatted Generated Synonyms of all Models.s
+outputFileNameGenerationMergedEmbeddings                    = f"{outputFolderNameGeneration}_merged_embeddings_{generateTimes}.{csvFileFormat}"
+outputFileGenerationMergedEmbeddings                        = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameMerged,
-    outputFileNameMergedEmbeddings
+    outputFileNameGenerationMergedEmbeddings
 )
 
-inputFileEvaluatedTerms         = outputFileMergedTerms
-inputFileEvaluatedGold          = outputFileGold
-inputFileEvaluatedEmbeddings    = outputFileMergedEmbeddings
-
-
-outputFileDistinctSynonymsRound  = os.path.join(
+# The Gold Standard output. No influence from models.
+outputFileNameGenerationGold                                = f"{outputFolderNameGeneration}_gold.{csvFileFormat}"
+outputFileGenerationGold                                    = os.path.join(
     dataDir,
     outputFolderName,
-    outputFolderNamePlot,
-    outputFileNameDistinctSynonymsRound
+    outputFolderNameGold,
+    outputFileNameGenerationGold
 )
 
-outputFileDistinctSynonymsConcept  = os.path.join(
+outputFileNameGenerationGoldEmbeddings                      = f"{outputFolderNameGeneration}_gold_embeddings.{csvFileFormat}"
+outputFileGenerationGoldEmbeddings                          = os.path.join(
     dataDir,
     outputFolderName,
-    outputFolderNamePlot,
-    outputFileNameDistinctSynonymsConcept
+    outputFolderNameGold,
+    outputFileNameGenerationGoldEmbeddings
+) 
+
+inputFileGenerationEvaluation                               = outputFileGenerationMerged
+inputFileGenerationEvaluationEmbeddings                     = outputFileGenerationMergedEmbeddings
+inputFileGenerationEvaluationGold                           = outputFileGenerationGold
+inputFileGenerationEvaluationGoldEmbeddings                 = outputFileGenerationGoldEmbeddings
+
+outputFileNameGenerationDistinctSynonymsRound               = f"{outputFolderNameGeneration}_distinct_synonyms_per_round.{plotFileFormat}"
+outputFileGenerationDistinctSynonymsRound                   = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameGenerationDistinctSynonymsRound
+) 
+outputFileNameGenerationDistinctSynonymsConcept             = f"{outputFolderNameGeneration}_distinct_synonyms_per_concept.{plotFileFormat}"
+outputFileGenerationDistinctSynonymsConcept                  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameGenerationDistinctSynonymsConcept
+) 
+outputFileNameGenerationNewSynonymsRound                    = f"{outputFolderNameGeneration}_new_synonyms_per_round.{plotFileFormat}"
+outputFileGenerationNewSynonymsRound                         = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameGenerationNewSynonymsRound
+) 
+outputFileNameGenerationCumulativeRecallPrecision           = f"{outputFolderNameGeneration}_cumulative_recall_precision.{plotFileFormat}"
+outputFileGenerationCumulativeRecallPrecision                = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameGenerationCumulativeRecallPrecision
+) 
+outputFileNameGenerationRecallPrecisionF1Appearance         = f"{outputFolderNameGeneration}_appearance_recall_precision_f1_count.{plotFileFormat}"
+outputFileGenerationRecallPrecisionF1Appearance              = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameGenerationRecallPrecisionF1Appearance
+) 
+outputFileNameGenerationCumulativeRecallPrecisionTotal      = f"{outputFolderNameGeneration}_cumulative_recall_precision_total.{plotFileFormat}"
+outputFileGenerationCumulativeRecallPrecisionTotal           = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameGenerationCumulativeRecallPrecisionTotal
+) 
+outputFileNameGenerationRecallPrecisionF1AppearanceTotal    = f"{outputFolderNameGeneration}_appearance_recall_precision_f1_count_total.{plotFileFormat}"
+outputFileGenerationRecallPrecisionF1AppearanceTotal         = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameGenerationRecallPrecisionF1AppearanceTotal
+) 
+
+# =============================================================================
+# Files for Synonym Classification
+# =============================================================================
+
+outputFolderNameClassification                  = "classification"
+
+
+
+inputFileClassification                         = outputFileTransformed if reduceToTestIDs else outputFileTransformedFull
+
+outputFileNameClassification                    = f"{outputFolderNameClassification}_{model_name}.{csvFileFormat}"
+outputFileClassification                        = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameClassification,
+    outputFileNameClassification
 )
 
-outputFileNewSynonymsRound  = os.path.join(
+# Contains the formatted Generated Synonyms of the Model. 
+inputFileClassificationFormatted                = outputFileClassification
+outputFileNameClassificationFormattedPrefix     = f"{outputFolderNameClassification}_formatted"
+outputFileNameClassificationFormatted           = f"{outputFileNameClassificationFormattedPrefix}_{model_name}.{csvFileFormat}"
+outputFileClassificationFormatted               = os.path.join(
     dataDir,
     outputFolderName,
-    outputFolderNamePlot,
-    outputFileNameNewSynonymsRound
+    outputFolderNameFormatted,
+    outputFileNameClassificationFormatted
 )
 
-outputFileCumulativeRecallPrecision  = os.path.join(
+inputFileNameClassificationMerged               = [
+    file
+    for file in os.listdir(os.path.join(dataDir, outputFolderName, outputFolderNameFormatted))
+    if file.startswith(outputFileNameClassificationFormattedPrefix) and file.endswith(csvFileFormat)
+]
+inputFileClassificationMerged                   = [
+    os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameClassificationMerged
+]
+
+outputFileNameClassificationMerged              = f"{outputFolderNameClassification}_merged_classes.{csvFileFormat}"
+outputFileClassificationMerged                  = os.path.join(
     dataDir,
     outputFolderName,
-    outputFolderNamePlot,
-    outputFileNameCumulativeRecallPrecision
+    outputFolderNameMerged,
+    outputFileNameClassificationMerged
 )
 
-outputFileRecallPrecisionF1Appearance  = os.path.join(
+inputFileClassificationEvaluation               = outputFileClassificationMerged
+
+outputFileNameClassificationRecallPrecisionF1   = f"{outputFolderNameClassification}_base_evaluation.{plotFileFormat}"
+outputFileClassificationRecallPrecisionF1 = os.path.join(
     dataDir,
     outputFolderName,
-    outputFolderNamePlot,
-    outputFileNameRecallPrecisionF1Appearance
+    outputFolderNameEvaluation,
+    outputFileNameClassificationRecallPrecisionF1
 )
 
-outputFileCumulativeRecallPrecisionTotal  = os.path.join(
+outputFileNameClassificationEvaluationExact     = f"{outputFolderNameClassification}_exact_evaluation.{plotFileFormat}"
+outputFileClassificationEvaluationExact         = os.path.join(
     dataDir,
     outputFolderName,
-    outputFolderNamePlot,
-    outputFileNameCumulativeRecallPrecisionTotal
+    outputFolderNameEvaluation,
+    outputFileNameClassificationEvaluationExact
 )
 
-outputFileRecallPrecisionF1AppearanceTotal  = os.path.join(
+outputFileNameClassificationEvaluationExactHPO     = f"{outputFolderNameClassification}_exact_HPO_evaluation.{plotFileFormat}"
+outputFileClassificationEvaluationExactHPO         = os.path.join(
     dataDir,
     outputFolderName,
-    outputFolderNamePlot,
-    outputFileNameRecallPrecisionF1AppearanceTotal
+    outputFolderNameEvaluation,
+    outputFileNameClassificationEvaluationExactHPO
+)
+
+outputFileNameClassificationEvaluationExactUBERON     = f"{outputFolderNameClassification}_exact_UBERON_evaluation.{plotFileFormat}"
+outputFileClassificationEvaluationExactUBERON         = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationEvaluationExactUBERON
+)
+outputFileNameClassificationEvaluationExactGO     = f"{outputFolderNameClassification}_exact_GO_evaluation.{plotFileFormat}"
+outputFileClassificationEvaluationExactGO         = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationEvaluationExactGO
+)
+outputFileNameClassificationEvaluationExactCHEBI     = f"{outputFolderNameClassification}_exact_CHEBI_evaluation.{plotFileFormat}"
+outputFileClassificationEvaluationExactCHEBI         = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationEvaluationExactCHEBI
+)
+
+outputFileNameClassificationAccuracyMacroMicro  = f"{outputFolderNameClassification}_accuracy_threshold.{plotFileFormat}"
+outputFileClassificationAccuracyMacroMicro      = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationAccuracyMacroMicro
+)
+
+outputFileNameClassificationClassAccuracy       = f"{outputFolderNameClassification}_class_accuracy.{plotFileFormat}"
+outputFileClassificationClassAccuracy           = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationClassAccuracy
+)
+
+# =============================================================================
+
+# =============================================================================
+# Files for Synonym Type Classification
+# =============================================================================
+
+outputFolderNameClassificationType                  = "type"
+
+
+
+inputFileClassificationType                         = outputFileTransformed if reduceToTestIDs else outputFileTransformedFull
+outputFileNameClassificationType                    = f"{outputFolderNameClassificationType}_{model_name}.{csvFileFormat}"
+outputFileClassificationType                            = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameClassificationType,
+    outputFileNameClassificationType
+)
+
+inputFileClassificationTypeFormatted                = outputFileClassificationType
+
+outputFileNameClassificationTypeFormattedPrefix     = f"{outputFolderNameClassificationType}_formatted"
+outputFileNameClassificationTypeFormatted           = f"{outputFileNameClassificationTypeFormattedPrefix}_{model_name}.{pickleFileFormat}"
+outputFileClassificationTypeFormatted               = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameFormatted,
+    outputFileNameClassificationTypeFormatted
+)
+
+inputFileNameClassificationTypeMerged               = [
+    file
+    for file in os.listdir(os.path.join(dataDir, outputFolderName, outputFolderNameFormatted))
+    if file.startswith(outputFileNameClassificationTypeFormattedPrefix) and file.endswith(csvFileFormat)
+]
+inputFileClassificationTypeMerged                   = [
+    os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameClassificationTypeMerged
+]
+
+outputFileNameClassificationTypeMerged              = f"{outputFolderNameClassificationType}_merged_classes.{pickleFileFormat}"
+outputFileClassificationTypeMerged                  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeMerged
+)
+
+inputFileClassificationTypeEvaluation               = outputFileClassificationTypeMerged
+
+outputFileNameClassificationTypeRecallPrecisionF1   = f"{outputFolderNameClassificationType}_base_evaluation_threshold.{plotFileFormat}"
+outputFileClassificationTypeMerged                  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeRecallPrecisionF1
+)
+
+outputFileNameClassificationTYpeAccuracyMacroMicro  = f"c{outputFolderNameClassificationType}_accuracy_threshold.{plotFileFormat}"
+outputFileClassificationTypeMerged                  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTYpeAccuracyMacroMicro
+)
+
+outputFileNameClassificationTypeClassAccuracy       = f"{outputFolderNameClassificationType}_class_accuracy.{plotFileFormat}"
+outputFileClassificationTypeMerged                  = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeClassAccuracy
 )
 
 # =============================================================================
 
 testIDs = list(set([
-    'HP:0001756', 'HP:0003189', 'HP:0000708', 'HP:0008069', 'HP:0009778',
+    'HP:0001756', 'HP:0003189', 'HP:0000708', 'HP:0008069', 'HP:0009778'
     'HP:0008331', 'HP:0007165', 'HP:0002020', 'HP:0010759', 'HP:0002659',
     'HP:0009891', 'HP:0007018', 'HP:0032514', 'HP:0000434', 'HP:0000692', 
     'HP:0025675', 'HP:0001511', 'HP:0000286', 'HP:0000448', 'HP:0000691', 

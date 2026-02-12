@@ -66,6 +66,12 @@ class Model:
             max_tokens=max_tokens
         )
 
+        log(f"Max Num batched Tokens: {max_num_batched_tokens}")
+        log(f"Max new Tokens: {max_tokens}")
+        log(f"Temperature: {temperature}")
+        log(f"Max Model Length: {max_model_len}")
+        log(f"GPUs: '{', '.join(gpu_id.split(','))}'")
+
     def addPrompt(self, role : str = userRole, message : list = []) -> int:
         """
         Add a message (or messages) to the conversation histories.

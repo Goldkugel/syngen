@@ -78,6 +78,7 @@ def getPreTaskPart4() -> str:
 def getAlternativeComplexPrompt1(
         label : str, 
         definition : str, 
+        comment : str, 
         parents : list = [], 
         children : list = []
 ) -> str:
@@ -85,10 +86,11 @@ def getAlternativeComplexPrompt1(
         "with generating EXACT synonyms for a Human Phenotype Ontology " \
         "(HPO) term.\n\n" \
     "Below is the information about the target HPO term.\n\n" \
-    f"[HPO LABEL]: {quote(label)}\n" \
-    f"[HPO DEFINITION]: {quote(definition)}\n" \
-    f"[PARENT TERMS]: {applyFormat(parents)}\n" \
-    f"[CHILD TERMS]: {applyFormat(children)}\n\n" \
+    f"Label]: {quote(label)}\n" \
+    f"Definition(s): {quote(definition)}\n" \
+    f"Comment: {quote(comment)}\n" \
+    f"Parent Concept(s): {applyFormat(parents)}\n" \
+    f"child Concept(s): {applyFormat(children)}\n\n" \
     "You may use the parent and child terms only to understand the semantic" \
         "boundaries of the target concept. Do not generate synonyms for the " \
         "child or parent terms, and do not use any wording that corresponds " \
@@ -223,3 +225,126 @@ def getAlternativeComplexPrompt5() -> str:
     "\t]\n" \
     "}\n\n" \
     "Produce exactly one JSON object as specified above."
+
+def getSynonymClassPrompt(
+        label : str, 
+        definition : str, 
+        comment : str, 
+        parents : list, 
+        children : list,
+        synonym : str
+)-> str:
+    return \
+    "Your Task:\n\n" \
+    "You are given a primary Human Phenotype Ontology (HPO) concept and a " \
+        "candidate synonym. Using only the information provided and HPO " \
+        "curation conventions, classify the synonym into exactly one of " \
+        "the following classes:\n\n" \
+    "\"Exact\", \"Broad\", \"Narrow\", or \"Related\"\n\n" \
+    "Your goal is to decide whether the candidate synonym could be used " \
+        "interchangeably with the primary label in phenotype annotation, " \
+        "not whether it is clinically, mechanistically, or etiologically " \
+        "identical.\n\n" \
+    "Mandatory ontology rules:\n\n" \
+    "Apply all of the following rules:\n" \
+    "- Collapse etiology, timing, and mechanism: Ignore differences such as " \
+        "congenital vs acquired, mechanism vs manifestation, histology vs " \
+        "appearance, or cause vs effect unless the synonym explicitly " \
+        "excludes part of the label’s meaning.\n" \
+    "- Treat historical, pathological, and descriptive disease names as " \
+        "\"Exact\": If multiple names refer to the same recognized disease " \
+        "entity (including deprecated, histologic, or descriptive names), " \
+        "classify as \"Exact\", even if they emphasize different features.\n" \
+    "- Accept lay, colloquial, and paraphrased descriptions as \"Exact\": " \
+        "Plain-language descriptions, shorthand phrases, or less technical " \
+        "wording are Exact if they describe the same observable phenotype.\n" \
+    "- Ignore pluralization and count: Singular vs plural forms (e.g., " \
+        "\"tumor\" vs \"tumors\", \"head\" vs \"heads\") are lexical " \
+        "variants, not semantic changes.\n" \
+    "- Named clinical signs ≡ defining descriptions: A named sign (e.g., " \
+        "\"sandal gap\", \"prognathia\") and a phrase that directly " \
+        "describes it are Exact, even if the description sounds broader or " \
+        "vaguer.\n" \
+    "- Size, projection, prominence, and excess are interchangeable in " \
+        "dysmorphology: Terms such as large, big, enlarged, prominent, " \
+        "projecting, excess, hyperplasia are \"Exact\⅛ when they refer to " \
+        "the same anatomical structure and direction of change.\n" \
+    "- Anatomical shorthand is acceptable: Closely related anatomical terms " \
+        "commonly used interchangeably in phenotype annotation (e.g., " \
+        "\"jaw\" ↔ \"mandible\", \"nasal ridge\" ↔ \"nasal dorsum\") are " \
+        "\"Exact\⅛ unless a clear exclusion is stated.\n" \
+    "- Laboratory proxies and functional readouts may be \"Exact\": If a " \
+        "laboratory measurement or functional descriptor is the standard " \
+        "phenotypic manifestation of the label, classify as \"Exact\" even " \
+        "if it represents a mechanism.\n\n" \
+    "When NOT to use \"Exact\":\n\n" \
+    "Only choose \"Broad\", \"Narrow\", or \"Related\" if one of the " \
+        "following is clearly true:\n\n" \
+    "- \"Broad\": The synonym explicitly includes additional phenotypes " \
+        "or anatomical regions not covered by the label.\n" \
+    "- \"Narrow\": The synonym explicitly refers to a subset or subtype " \
+        "of the label that does not cover all instances.\n" \
+    "- Related: The synonym describes a different pathological process, " \
+        "disease category, or downstream condition that cannot replace the " \
+        "label in annotation.\n\n" \
+    "Do not downgrade to \"Broad\"/\"Narrow\"/\"Related\" solely because " \
+        "of:\n\n"  \
+    "- Different terminology\n- Different emphasis\n- Added descriptive " \
+        "detail\n- Clinical causality\n- Pathological mechanism\n" \
+        "- Severity or degree\n- Common clinical usage differences\n\n" \
+    "Primary HPO concept:\n\n" \
+    f"- Label: {quote(label)}\n" \
+    f"- Definition: {quote(definition)}\n" \
+    f"- Comment: {quote(comment)}\n" \
+    f"- Parent concept(s): {applyFormat(parents)}\n" \
+    f"- Child concept(s): {applyFormat(children)}\n\n" \
+    "Candidate synonym:\n\n" \
+    f"- Synonym: {quote(synonym)}\n\n" \
+    "Class definitions:\n\n" \
+    "- \"Exact\": Interchangeable in phenotype annotation.\n" \
+    "- \"Broad\": More general than the label.\n" \
+    "- \"Narrow\": More specific than the label.\n" \
+    "- \"Related\": Conceptually associated but not interchangeable.\n\n" \
+    "Output format (strict):\n\n" \
+    "Output exactly one of the following and nothing else: \"Exact\", " \
+        "\"Broad\", \"Narrow\", and \"Related\"\n." \
+    "Do not include explanations or reasoning."
+
+def getSynonymTypePrompt(
+        label : str, 
+        definition : str, 
+        comment : str,  
+        parents : list,
+        children : list, 
+        synonym : str
+)-> str:
+    return \
+    "Your Task:\n\n" \
+    "You are given information about a primary Human Phenotype Ontology " \
+        "(HPO) concept and a candidate synonym. Using only the information " \
+        "provided, classify the synonym into exactly one of the following " \
+        "classes: \"Lay-person\" or \"Expert\".\n\n" \
+    "Primary HPO concept:\n\n" \
+    f"- Label: {quote(label)}\n" \
+    f"- Definition: {quote(definition)}\n" \
+    f"- Comment: {quote(comment)}\n" \
+    f"- Parent concept(s): {applyFormat(parents)}\n" \
+    f"- Child concept(s): {applyFormat(children)}\n\n" \
+    "Candidate synonym:\n\n" \
+    f"- Label: {quote(synonym)}\n\n" \
+    "Class definitions:\n\n" \
+    "- Lay-person: used by general public such as \"heart attack\" for " \
+        "\"Myocardial infarction\" or \"high blood pressure\" for " \
+        "\"Hypertension\".\n" \
+    "- Expert: Used by clinicians, researchers, or specialists. These " \
+        "synonyms rely on technical or standardized medical language and " \
+        "are intended for professional communication rather than general " \
+            "public understanding.\n" \
+    "Analyze the relationship between the synonym and the label using\n\n" \
+    "- The definition and comment\n" \
+    "- The parent and child concepts\n\n" \
+    "Select the single class that best characterizes the relationship.\n\n" \
+    "Output exactly one of the following classes and nothing else:\n\n" \
+    "\"Lay-person\" or \"Expert\".\n" \
+    "Do not include explanations or reasoning. Use \"Unclear\" only when " \
+        "the provided information does not allow a defensible classification."

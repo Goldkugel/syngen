@@ -2,6 +2,7 @@ import pandas       as pd
 import Levenshtein  as lev
 import sys
 import os
+import json
 
 from datetime       import datetime as dt
 from rich.table     import Table
@@ -28,7 +29,7 @@ def createDir(dir: str = "") -> bool:
     Create a directory under the configured data directory.
     Does nothing if the directory already exists.
     """
-    os.makedirs(os.path.join(dataDir, dir), exist_ok=True)
+    os.makedirs(os.path.join(dataDir, dir), exist_ok = True)
 
 
 def isFile(file: str = "") -> bool:
@@ -199,7 +200,7 @@ def exitIfFileNotExist(file: str) -> None:
     """
     if not isFile(file):
         log(f"{os.path.basename(file)} could not be found. Terminating.")
-        quit(1)
+        sys.exit(1)
 
 
 def printHeader(text: str = "") -> None:
@@ -269,6 +270,14 @@ def readPickle(file: str = "") -> pd.DataFrame:
     printReadDone(file)
     return ret
 
+def readCSV(file: str = "") -> pd.DataFrame:
+    """
+    Read a CSV file from disk with logging.
+    """
+    printRead(file)
+    ret = pd.read_csv(file, low_memory = False)
+    printReadDone(file)
+    return ret
 
 def log(
     string: str,
@@ -298,6 +307,14 @@ def writePickle(data: pd.DataFrame, file: str = "") -> None:
     """
     printWrite(file)
     pd.to_pickle(data, file)
+    printWriteDone(file)
+
+def writeCSV(data: pd.DataFrame, file: str = "") -> None:
+    """
+    Write a DataFrame to disk as a pickle with logging.
+    """
+    printWrite(file)
+    data.to_csv(file, index = False)
     printWriteDone(file)
 
 
@@ -871,4 +888,107 @@ def checkEntries(data: pd.DataFrame, hpoID: str = "") -> pd.DataFrame:
 
             ret = subset
 
+    return ret
+
+def formatAnswerGeneration(txt : str, label : str) -> list:
+    ret = None
+
+    # Retrieve and normalize raw LLM answer text
+    answer = str(txt).strip()
+    answer = answer.replace("```json", "")
+    answer = answer.replace("```", "")
+    answer = answer.replace("\n", "")
+    answer = answer.replace("'", '"')
+
+    # Attempt to isolate a JSON object in the response
+    if "{" in answer and "}" in answer:
+        answer = answer[answer.index("{"):answer.index("}") + 1]
+
+        try:
+            # Parse JSON content
+            jsonAnswer = json.loads(answer)
+
+            if jsonAnswer is not None:
+                # Expect a dictionary containing "exact_synonyms"
+                if isinstance(jsonAnswer, dict) and "exact_synonyms" in \
+                        dict(jsonAnswer).keys():
+                    
+                    ret = jsonAnswer["exact_synonyms"]
+
+                    # Validate synonym list structure
+                    if (
+                        ret is not None
+                        and isinstance(ret, list)
+                        and all(isinstance(item, str) for item in ret)
+                    ):
+                        # Remove duplicates and empty strings
+                        ret = list(set(ret))
+                        if "" in ret:
+                            ret.remove("")
+
+                        # Remove label if it appears among synonyms
+                        
+                        if label in ret:
+                            ret.remove(label)
+                    else:
+                        ret = None
+                else:
+                    ret = None
+            else:
+                ret = None
+        except json.JSONDecodeError:
+            # JSON parsing failed
+            ret = None
+    else:
+        # No JSON-like structure found
+        ret = None
+        
+    return ret
+        
+
+def formatAnswerClassification(txt : str) -> str:
+    ret = undefinedSynonymType
+
+    if txt is not None:
+        ret = txt.lower()
+        if unusedTokens in ret:
+            ret = ret[ret.index(unusedTokens) + len(unusedTokens):]
+
+        if exactSynonymClass in ret and broadSynonymClass not in ret and \
+            narrowSynonymClass not in ret and relatedSynonymClass not in ret:
+            ret = exactSynonymClass
+        else:
+            if exactSynonymClass not in ret and broadSynonymClass in ret and \
+                narrowSynonymClass not in ret and relatedSynonymClass not \
+                    in ret:
+                ret = broadSynonymClass
+            else:
+                if exactSynonymClass not in ret and broadSynonymClass not \
+                    in ret and narrowSynonymClass in ret and \
+                        relatedSynonymClass not in ret:
+                    ret = narrowSynonymClass
+                else:
+                    if exactSynonymClass not in ret and broadSynonymClass not \
+                        in ret and narrowSynonymClass not \
+                            in ret and relatedSynonymClass in ret:
+                        ret = relatedSynonymClass
+                    else:
+                        ret = undefinedSynonymType
+    return ret
+
+def formatAnswerClassificationType(txt : str) -> str:
+    ret = undefinedSynonymType
+
+    if txt is not None:
+        ret = txt.lower()
+        if unusedTokens in ret:
+            ret = ret[ret.index(unusedTokens) + len(unusedTokens):]
+
+        if laypersonSynonymType in ret and expertSynonymType not in ret:
+            ret = laypersonSynonymType
+        else:
+            if laypersonSynonymType not in ret and expertSynonymType in ret:
+                ret = expertSynonymType
+            else:
+                ret = undefinedSynonymType
     return ret
