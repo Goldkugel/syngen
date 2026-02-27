@@ -17,6 +17,12 @@ exitIfFileNotExist(inputFileClassificationFormatted)
 # Load the dataset from a pickle file
 classified    = readCSV(inputFileClassificationFormatted)
 
+
+
+
+
+
+
 with newProgress() as progress:
 
     task = newTask(progress, len(classified.index), "Formatting Answers")
@@ -27,10 +33,14 @@ with newProgress() as progress:
 
     progress.refresh()
 
+
+
+
+
+
+
 writeCSV(classified, outputFileClassificationFormatted)
 
-end_time = time.time()
-elapsed_seconds = end_time - start_time
-minutes = int(elapsed_seconds // 60)
+minutes         = int((time.time() - start_time) // 60)
 
 printHeader(f"Fomratting completed")

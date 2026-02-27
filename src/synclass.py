@@ -22,6 +22,11 @@ exitIfFileNotExist(inputFileClassificationType)
 # Load the dataset from a pickle file
 gold    = readCSV(inputFileClassificationType)
 
+
+
+
+
+
 synonyms = gold[gold[classColumn].isin(synonymClasses)].copy().reset_index(drop = True)
 
 parents = {}
@@ -77,11 +82,14 @@ for index, history in enumerate(histories):
         synonyms.loc[index, answerColumn] = str(history[-1][messageTextElement]).strip()
         synonyms.loc[index, systemColumn] = model_name
 
+
+
+
+
+
 writeCSV(synonyms, outputFileClassification)
 
-end_time = time.time()
-elapsed_seconds = end_time - start_time
-minutes = int(elapsed_seconds // 60)
+minutes         = int((time.time() - start_time) // 60)
 
 # Print a formatted header indicating the end of this processing stage
 printHeader(f"Synonyms Classified [Minutes: {minutes}]")

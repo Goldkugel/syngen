@@ -992,3 +992,53 @@ def formatAnswerClassificationType(txt : str) -> str:
             else:
                 ret = undefinedSynonymType
     return ret
+
+def getHPOIDs(data : pd.DataFrame) -> list:
+    ret = []
+
+    if reduceToTestIDs:
+        ret = testIDs
+    else:
+        if data is not None and len(data.index) > 0 and hpoidColumn in data.columns:
+            ret = list(set(data[hpoidColumn].tolist()))
+
+    return ret
+
+def getMetrics(
+        data            : pd.DataFrame = None, 
+        classColumn     : str   = "", 
+        answerColumn    : str   = "", 
+        className       : str   = ""
+) -> object:
+    ret = {
+        precisionLabel  : 0,
+        recallLabel     : 0,
+        f1ScoreLabel    : 0
+    }
+
+    if (data is not None and 
+        len(classColumn) > 0 and 
+        len(answerColumn) > 0 and
+        len(className) > 0 and 
+        classColumn in data.columns and 
+        answerColumn in data.columns and 
+        len(data[data[answerColumn] == className].index) > 0 and
+        len(data[data[classColumn] == className].index) > 0
+    ):
+            ret[precisionLabel] = len(data[(data[classColumn] == className) & (
+                data[answerColumn] == className)].index
+                ) / (len(data[data[answerColumn] == className].index))
+            
+            ret[recallLabel] = len(data[(data[typeColumn] == className) & (
+                data[answerColumn] == className)].index
+                ) / (len(data[data[classColumn] == className].index))
+
+            
+            if ret[precisionLabel] > 0 or ret[recallLabel] > 0:
+                ret[f1ScoreLabel] = (
+                    (2 * ret[precisionLabel] * ret[recallLabel]) / (
+                    ret[recallLabel] + 
+                    ret[precisionLabel]))
+
+    return ret
+    

@@ -27,6 +27,11 @@ start_time = time.time()
 # Ensure the input file exists before proceeding.
 exitIfFileNotExist(inputFileTransformed)
 
+
+
+
+
+
 # Load the ontology from the OWL file
 printRead(inputFileTransformed)
 hpo = get_ontology(inputFileTransformed).load()
@@ -104,8 +109,8 @@ log(f"Removed {rowCount - len(data.index)} Rows due to Empty Content.")
 printRowCount(data)
 printDataSummary(data)
 
-log(f"Write full transformated Data into \"{os.path.basename(outputFileTransformedFull)}\"...")
-data.to_csv(outputFileTransformedFull, index = False)
+log("Write full transformated Data...")
+writeCSV(data, outputFileTransformedFull)
 log("Full transformed Data written.")
 
 # ------------------------------------------------------------------------------
@@ -169,13 +174,15 @@ if len(testIDs) > 0:
     # Persist transformed data to disk
     # ------------------------------------------------------------------------------
 
-    log(f"Write reduced transformated Data into \"{os.path.basename(outputFileTransformed)}\"...")
-    # Save the final DataFrame as a pickle file
-    data.to_csv(outputFileTransformed, index = False)
+    log("Write reduced transformated Data...")
+    writeCSV(data, outputFileTransformed)
     log("Reduced transformed Data written.")
 
-end_time = time.time()
-elapsed_seconds = end_time - start_time
-minutes = int(elapsed_seconds // 60)
+
+
+
+
+
+minutes         = int((time.time() - start_time) // 60)
 
 printHeader(f"Transforming completed [Minutes: {minutes}]")

@@ -21,10 +21,11 @@ reduceToTestIDs = False
 #model_id = "meta-llama/Llama-3.3-70B-Instruct"
 
 model_id = ""
+model_name = ""
 # model_id = "google/medgemma-4b-it"
 if len(sys.argv) > 1 and sys.argv[1][0] != "-":
     model_id = sys.argv[1]
-model_name = model_id[model_id.index("/") + 1:]
+    model_name = model_id[model_id.index("/") + 1:]
 
 embedding_model_id = "abhinand/MedEmbed-large-v0.1"
 
@@ -38,7 +39,7 @@ if len(sys.argv) > 2:
 # Must be in (0, 1]. Set to 1 to consider all tokens.
 top_p=1
 
-max_model_len = 4 * 8192
+max_model_len = 0.5 * 8192
 max_num_batched_tokens = 2 * max_model_len
 
 # Float that controls the randomness of the sampling. Lower values make the 
@@ -198,7 +199,7 @@ outputFolderNameEvaluation          = "evaluate"
 
 logFileName                         = f"syngen_{model_name}.{logFileFormat}"
 if model_name == "":
-    logFileName                         = f"syngen.{logFileFormat}"
+    logFileName                     = f"syngen.{logFileFormat}"
 logFilePromptsName                  = f"prompts_{model_name}.{logFileFormat}"
 
 logFile                     = os.path.join(
@@ -443,6 +444,16 @@ outputFileClassificationMerged                  = os.path.join(
 
 inputFileClassificationEvaluation               = outputFileClassificationMerged
 
+outputFileNameClassificationCounts   = f"{outputFolderNameClassification}_counts.{plotFileFormat}"
+outputFileClassificationCounts       = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationCounts
+)
+
+evaluationClasses = [exactSynonymClass, relatedSynonymClass]
+
 outputFileNameClassificationRecallPrecisionF1   = f"{outputFolderNameClassification}_base_evaluation.{plotFileFormat}"
 outputFileClassificationRecallPrecisionF1 = os.path.join(
     dataDir,
@@ -527,7 +538,7 @@ outputFileClassificationType                            = os.path.join(
 inputFileClassificationTypeFormatted                = outputFileClassificationType
 
 outputFileNameClassificationTypeFormattedPrefix     = f"{outputFolderNameClassificationType}_formatted"
-outputFileNameClassificationTypeFormatted           = f"{outputFileNameClassificationTypeFormattedPrefix}_{model_name}.{pickleFileFormat}"
+outputFileNameClassificationTypeFormatted           = f"{outputFileNameClassificationTypeFormattedPrefix}_{model_name}.{csvFileFormat}"
 outputFileClassificationTypeFormatted               = os.path.join(
     dataDir,
     outputFolderName,
@@ -544,26 +555,34 @@ inputFileClassificationTypeMerged                   = [
     os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameClassificationTypeMerged
 ]
 
-outputFileNameClassificationTypeMerged              = f"{outputFolderNameClassificationType}_merged_classes.{pickleFileFormat}"
+outputFileNameClassificationTypeMerged              = f"{outputFolderNameClassificationType}_merged_classes.{csvFileFormat}"
 outputFileClassificationTypeMerged                  = os.path.join(
     dataDir,
     outputFolderName,
-    outputFolderNameEvaluation,
+    outputFolderNameMerged,
     outputFileNameClassificationTypeMerged
 )
 
 inputFileClassificationTypeEvaluation               = outputFileClassificationTypeMerged
 
+outputFileNameClassificationTypeCounts   = f"{outputFolderNameClassificationType}_counts.{plotFileFormat}"
+outputFileClassificationTypeCounts       = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeCounts
+)
+
 outputFileNameClassificationTypeRecallPrecisionF1   = f"{outputFolderNameClassificationType}_base_evaluation_threshold.{plotFileFormat}"
-outputFileClassificationTypeMerged                  = os.path.join(
+outputFileClassificationTypeRecallPrecisionF1       = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameEvaluation,
     outputFileNameClassificationTypeRecallPrecisionF1
 )
 
-outputFileNameClassificationTYpeAccuracyMacroMicro  = f"c{outputFolderNameClassificationType}_accuracy_threshold.{plotFileFormat}"
-outputFileClassificationTypeMerged                  = os.path.join(
+outputFileNameClassificationTYpeAccuracyMacroMicro  = f"{outputFolderNameClassificationType}_accuracy_threshold.{plotFileFormat}"
+outputFileClassificationTYpeAccuracyMacroMicro      = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameEvaluation,
@@ -571,11 +590,43 @@ outputFileClassificationTypeMerged                  = os.path.join(
 )
 
 outputFileNameClassificationTypeClassAccuracy       = f"{outputFolderNameClassificationType}_class_accuracy.{plotFileFormat}"
-outputFileClassificationTypeMerged                  = os.path.join(
+outputFileClassificationTypeClassAccuracy           = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameEvaluation,
     outputFileNameClassificationTypeClassAccuracy
+)
+
+outputFileNameClassificationTypeEvaluationExactHPO  = f"{outputFolderNameClassificationType}_exact_HPO_evaluation.{plotFileFormat}"
+outputFileClassificationTypeEvaluationExactHPO      = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeEvaluationExactHPO
+)
+
+outputFileNameClassificationTypeEvaluationExactUBERON  = f"{outputFolderNameClassificationType}_exact_UBERON_evaluation.{plotFileFormat}"
+outputFileClassificationTypeEvaluationExactUBERON      = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeEvaluationExactUBERON
+)
+
+outputFileNameClassificationTypeEvaluationExactGO  = f"{outputFolderNameClassificationType}_exact_GO_evaluation.{plotFileFormat}"
+outputFileClassificationTypeEvaluationExactGO      = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeEvaluationExactGO
+)
+
+outputFileNameClassificationTypeEvaluationExactCHEBI  = f"{outputFolderNameClassificationType}_exact_CHEBI_evaluation.{plotFileFormat}"
+outputFileClassificationTypeEvaluationExactCHEBI      = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeEvaluationExactCHEBI
 )
 
 # =============================================================================

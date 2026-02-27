@@ -14,6 +14,11 @@ from utils      import *
 printHeader(f"Merging Generated Type Classifications")
 start_time = time.time()
 
+
+
+
+
+
 # Merging Generated Classes
 if len(inputFileClassificationTypeMerged) == 0:
     log(f"No '{csvFileFormat}' files with prefix " + 
@@ -22,13 +27,13 @@ if len(inputFileClassificationTypeMerged) == 0:
 else:
     # Read and merge CSV files
     dataframes = []
-    log("Reading files...")
+    log(f"Reading {len(inputFileClassificationTypeMerged)} files...")
     with newProgress() as progress:
         task = newTask(progress, len(inputFileClassificationTypeMerged), 
             "Processing Files")
 
         for file in sorted(inputFileClassificationTypeMerged):
-            dataframes.append(pd.read_csv(file, index = False))
+            dataframes.append(pd.read_csv(file))
             progress.update(task, advance = 1)
 
         progress.refresh()
@@ -47,9 +52,12 @@ else:
     log(f"Merged {len(inputFileClassificationTypeMerged)} files into " + 
         f"'{os.path.basename(outputFileClassificationTypeMerged)}'")
 
-end_time = time.time()
-elapsed_seconds = end_time - start_time
-minutes = int(elapsed_seconds // 60)
+
+
+
+
+
+minutes         = int((time.time() - start_time) // 60)
 
 # Print a formatted header indicating the end of this processing stage
 printHeader(f"Data Merged [Minutes: {minutes}]")

@@ -29,23 +29,73 @@ for key in counts.keys():
     if (counts[key] > 1000):
         log(f"Found {counts[key]} entries in HPO for ontology '{key}'.")
 
-
-classified = classified_complete
-
-systemsName = list(set(classified[systemColumn].tolist()))
+systemsName = list(set(classified_complete[systemColumn].tolist()))
 
 string = "', '".join(systemsName)
 log(f"Found Systems: '{string}'")
-log(f"Classified Synonyms: {len(classified.index)} (~{int(len(classified.index) / len(systemsName))} per system)")
-classified   = classified[classified[systemColumn] != ""]
+log(f"Classified Synonyms: {len(classified_complete.index)} (~{int(len(classified_complete.index) / len(systemsName))} per system)")
+classified_complete   = classified_complete[classified_complete[systemColumn] != ""]
 
-classified[classColumn] = classified[classColumn].str.lower()
-classified[answerColumn] = classified[answerColumn].str.lower()
+# Change Datatype to String. 
+classified_complete[classColumn]    = classified_complete[classColumn ].str.lower()
+classified_complete[answerColumn]   = classified_complete[answerColumn].str.lower()
+classified_complete[typeColumn]     = classified_complete[typeColumn  ].str.lower()
 
-systems     = list(set(classified[systemColumn].tolist()))
-classificationClasses = list(set(classified[classColumn]))
+classified_complete[typeColumn]     = classified_complete[typeColumn].replace(np.nan, expertSynonymType)
+classificationClasses               = [expertSynonymType, laypersonSynonymType]
+classified_complete                 = classified_complete[(classified_complete[typeColumn].isin(classificationClasses)) & (classified_complete[systemColumn] != "")].copy().reset_index(drop = True)
+
+
+
+systems     = list(set(classified_complete[systemColumn].tolist()))
+classificationClasses = list(set(classified_complete[classColumn]))
 
 colors = plt.cm.tab10(range(len(systems) + 1))
+
+
+
+
+
+
+classified = classified_complete.copy().drop([answerColumn, systemColumn], axis=1).drop_duplicates().reset_index(drop = True)
+classes = Counter(classified[classColumn])
+
+# Prepare data for plotting
+labels = list(classes.keys())
+values = list(classes.values())
+
+# Create the bar plot
+plt.figure()
+bars = plt.bar(labels, values, color = colors)
+
+# Add counts on top of each bar
+for bar in bars:
+    height = bar.get_height()
+    plt.text(
+        bar.get_x() + bar.get_width() / 2,
+        height,
+        str(height),
+        ha='center',
+        va='bottom'
+    )
+
+plt.xlabel("Source Type")
+plt.ylabel("Count")
+plt.title("Count of Source Type")
+plt.grid(axis = "y")
+plt.show()
+plt.savefig(outputFileClassificationCounts, dpi = 300, 
+    bbox_inches = "tight")
+
+classified_complete = classified_complete[classified_complete[classColumn].isin(evaluationClasses)].copy().reset_index(drop = True)
+
+
+
+
+
+
+
+classified = classified_complete.copy()
 
 result = {}
 
@@ -55,7 +105,7 @@ for system in systems:
     systemResults = {}
 
     if systemData is not None and len(systemData.index) > 0:
-        for classificationClass in classificationClasses:
+        for evaluationClass in evaluationClasses:
             
             systemClassResults = {
                 precisionLabel  : 0,
@@ -64,41 +114,44 @@ for system in systems:
             }
 
             if len(systemData[systemData[answerColumn] == 
-                classificationClass].index) > 0:
+                evaluationClass].index) > 0:
 
                 systemClassResults[precisionLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[answerColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                 
                 systemClassResults[recallLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[classColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                     
-                systemClassResults[f1ScoreLabel] = \
-                    2 * systemClassResults[precisionLabel] * \
-                    systemClassResults[recallLabel] / (
-                    systemClassResults[recallLabel] + 
-                    systemClassResults[precisionLabel])
+                if systemClassResults[recallLabel] > 0 or systemClassResults[precisionLabel] > 0:
+                    systemClassResults[f1ScoreLabel] = \
+                        2 * systemClassResults[precisionLabel] * \
+                        systemClassResults[recallLabel] / (
+                        systemClassResults[recallLabel] + 
+                        systemClassResults[precisionLabel])
+                else:
+                    systemClassResults[f1ScoreLabel] = 0
             else:
                 systemClassResults[f1ScoreLabel]    = 0
                 systemClassResults[recallLabel]     = 0
                 systemClassResults[precisionLabel]  = 0
 
-            systemResults[classificationClass] = systemClassResults
+            systemResults[evaluationClass] = systemClassResults
 
     result[system] = systemResults
 
@@ -169,6 +222,9 @@ for i, cls in enumerate(classes):
 fig.suptitle("Per-Class and Per-Metric Comparison Across Systems for Full HPO Concepts", fontsize=14)
 plt.tight_layout(rect=[0, 0.05, 1, 1])
 plt.savefig(outputFileClassificationRecallPrecisionF1, dpi=300, bbox_inches="tight")
+
+
+
 
 
 
@@ -250,7 +306,7 @@ for system in systems:
     systemResults = {}
 
     if systemData is not None and len(systemData.index) > 0:
-        for classificationClass in classificationClasses:
+        for evaluationClass in evaluationClasses:
             
             systemClassResults = {
                 precisionLabel  : 0,
@@ -259,41 +315,44 @@ for system in systems:
             }
 
             if len(systemData[systemData[answerColumn] == 
-                classificationClass].index) > 0:
+                evaluationClass].index) > 0:
 
                 systemClassResults[precisionLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[answerColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                 
                 systemClassResults[recallLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[classColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                     
-                systemClassResults[f1ScoreLabel] = \
-                    2 * systemClassResults[precisionLabel] * \
-                    systemClassResults[recallLabel] / (
-                    systemClassResults[recallLabel] + 
-                    systemClassResults[precisionLabel])
+                if systemClassResults[recallLabel] > 0 or systemClassResults[precisionLabel] > 0:
+                    systemClassResults[f1ScoreLabel] = \
+                        2 * systemClassResults[precisionLabel] * \
+                        systemClassResults[recallLabel] / (
+                        systemClassResults[recallLabel] + 
+                        systemClassResults[precisionLabel])
+                else:
+                    systemClassResults[f1ScoreLabel] = 0
             else:
                 systemClassResults[f1ScoreLabel]    = 0
                 systemClassResults[recallLabel]     = 0
                 systemClassResults[precisionLabel]  = 0
 
-            systemResults[classificationClass] = systemClassResults
+            systemResults[evaluationClass] = systemClassResults
 
     result[system] = systemResults
 
@@ -373,7 +432,7 @@ for system in systems:
     systemResults = {}
 
     if systemData is not None and len(systemData.index) > 0:
-        for classificationClass in classificationClasses:
+        for evaluationClass in evaluationClasses:
             
             systemClassResults = {
                 precisionLabel  : 0,
@@ -382,41 +441,44 @@ for system in systems:
             }
 
             if len(systemData[systemData[answerColumn] == 
-                classificationClass].index) > 0:
+                evaluationClass].index) > 0:
 
                 systemClassResults[precisionLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[answerColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                 
                 systemClassResults[recallLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[classColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                     
-                systemClassResults[f1ScoreLabel] = \
-                    2 * systemClassResults[precisionLabel] * \
-                    systemClassResults[recallLabel] / (
-                    systemClassResults[recallLabel] + 
-                    systemClassResults[precisionLabel])
+                if systemClassResults[recallLabel] > 0 or systemClassResults[precisionLabel] > 0:
+                    systemClassResults[f1ScoreLabel] = \
+                        2 * systemClassResults[precisionLabel] * \
+                        systemClassResults[recallLabel] / (
+                        systemClassResults[recallLabel] + 
+                        systemClassResults[precisionLabel])
+                else:
+                    systemClassResults[f1ScoreLabel] = 0
             else:
                 systemClassResults[f1ScoreLabel]    = 0
                 systemClassResults[recallLabel]     = 0
                 systemClassResults[precisionLabel]  = 0
 
-            systemResults[classificationClass] = systemClassResults
+            systemResults[evaluationClass] = systemClassResults
 
     result[system] = systemResults
 
@@ -495,7 +557,7 @@ for system in systems:
     systemResults = {}
 
     if systemData is not None and len(systemData.index) > 0:
-        for classificationClass in classificationClasses:
+        for evaluationClass in evaluationClasses:
             
             systemClassResults = {
                 precisionLabel  : 0,
@@ -504,41 +566,44 @@ for system in systems:
             }
 
             if len(systemData[systemData[answerColumn] == 
-                classificationClass].index) > 0:
+                evaluationClass].index) > 0:
 
                 systemClassResults[precisionLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[answerColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                 
                 systemClassResults[recallLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[classColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                     
-                systemClassResults[f1ScoreLabel] = \
-                    2 * systemClassResults[precisionLabel] * \
-                    systemClassResults[recallLabel] / (
-                    systemClassResults[recallLabel] + 
-                    systemClassResults[precisionLabel])
+                if systemClassResults[recallLabel] > 0 or systemClassResults[precisionLabel] > 0:
+                    systemClassResults[f1ScoreLabel] = \
+                        2 * systemClassResults[precisionLabel] * \
+                        systemClassResults[recallLabel] / (
+                        systemClassResults[recallLabel] + 
+                        systemClassResults[precisionLabel])
+                else:
+                    systemClassResults[f1ScoreLabel] = 0
             else:
                 systemClassResults[f1ScoreLabel]    = 0
                 systemClassResults[recallLabel]     = 0
                 systemClassResults[precisionLabel]  = 0
 
-            systemResults[classificationClass] = systemClassResults
+            systemResults[evaluationClass] = systemClassResults
 
     result[system] = systemResults
 
@@ -617,7 +682,7 @@ for system in systems:
     systemResults = {}
 
     if systemData is not None and len(systemData.index) > 0:
-        for classificationClass in classificationClasses:
+        for evaluationClass in evaluationClasses:
             
             systemClassResults = {
                 precisionLabel  : 0,
@@ -626,41 +691,44 @@ for system in systems:
             }
 
             if len(systemData[systemData[answerColumn] == 
-                classificationClass].index) > 0:
+                evaluationClass].index) > 0:
 
                 systemClassResults[precisionLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[answerColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                 
                 systemClassResults[recallLabel] = \
                     len(systemData[
-                            (systemData[classColumn] == classificationClass
+                            (systemData[classColumn] == evaluationClass
                                 ) & (
-                            systemData[answerColumn] == classificationClass)
+                            systemData[answerColumn] == evaluationClass)
                         ].index
                     ) / (
                         len(systemData[systemData[classColumn] == 
-                            classificationClass].index) 
+                            evaluationClass].index) 
                     )
                     
-                systemClassResults[f1ScoreLabel] = \
-                    2 * systemClassResults[precisionLabel] * \
-                    systemClassResults[recallLabel] / (
-                    systemClassResults[recallLabel] + 
-                    systemClassResults[precisionLabel])
+                if systemClassResults[recallLabel] > 0 or systemClassResults[precisionLabel] > 0:
+                    systemClassResults[f1ScoreLabel] = \
+                        2 * systemClassResults[precisionLabel] * \
+                        systemClassResults[recallLabel] / (
+                        systemClassResults[recallLabel] + 
+                        systemClassResults[precisionLabel])
+                else:
+                    systemClassResults[f1ScoreLabel] = 0
             else:
                 systemClassResults[f1ScoreLabel]    = 0
                 systemClassResults[recallLabel]     = 0
                 systemClassResults[precisionLabel]  = 0
 
-            systemResults[classificationClass] = systemClassResults
+            systemResults[evaluationClass] = systemClassResults
 
     result[system] = systemResults
 

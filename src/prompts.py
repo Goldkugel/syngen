@@ -321,10 +321,18 @@ def getSynonymTypePrompt(
     return \
     "Your Task:\n\n" \
     "You are given information about a primary Human Phenotype Ontology " \
-        "(HPO) concept and a candidate synonym. Using only the information " \
-        "provided, classify the synonym into exactly one of the following " \
-        "classes: \"Lay-person\" or \"Expert\".\n\n" \
-    "Primary HPO concept:\n\n" \
+        "(HPO) concept and a candidate synonym.\n\n" \
+    "Your task is to classify the candidate synonym according to its " \
+        "language register, not its semantic relationship to the primary " \
+        "concept.\n\n" \
+    "Important:\n\n" \
+    "This is NOT a task about whether the synonym is a direct match, " \
+        "broader term, narrower term, or spelling variant.\n" \
+    "The ONLY goal is " \
+        "to determine whether the synonym is written in lay (everyday) " \
+        "language or expert (professional medical) language.\n" \
+    "Use only the information provided.\n\n" \
+   "Primary HPO concept:\n\n" \
     f"- Label: {quote(label)}\n" \
     f"- Definition: {quote(definition)}\n" \
     f"- Comment: {quote(comment)}\n" \
@@ -333,18 +341,28 @@ def getSynonymTypePrompt(
     "Candidate synonym:\n\n" \
     f"- Label: {quote(synonym)}\n\n" \
     "Class definitions:\n\n" \
-    "- Lay-person: used by general public such as \"heart attack\" for " \
-        "\"Myocardial infarction\" or \"high blood pressure\" for " \
-        "\"Hypertension\".\n" \
-    "- Expert: Used by clinicians, researchers, or specialists. These " \
-        "synonyms rely on technical or standardized medical language and " \
-        "are intended for professional communication rather than general " \
-            "public understanding.\n" \
-    "Analyze the relationship between the synonym and the label using\n\n" \
-    "- The definition and comment\n" \
-    "- The parent and child concepts\n\n" \
-    "Select the single class that best characterizes the relationship.\n\n" \
-    "Output exactly one of the following classes and nothing else:\n\n" \
-    "\"Lay-person\" or \"Expert\".\n" \
-    "Do not include explanations or reasoning. Use \"Unclear\" only when " \
-        "the provided information does not allow a defensible classification."
+    "- Layperson: Uses everyday, non-technical language that would be " \
+        "understood by the general public. These expressions avoid " \
+        "specialized medical jargon and often describe conditions in " \
+        "plain English. (e.g., 'heart attack' instead of 'myocardial " \
+        "infarction', 'tooth decay' instead of 'dental caries', 'small " \
+        "lung' instead of 'pulmonary hypoplasia').\n" \
+    "- Expert: Uses technical, clinical, anatomical, Greek/Latin-derived, " \
+        "or standardized medical terminology intended for communication " \
+        "among healthcare professionals or researchers (e.g., " \
+        "'myocardial infarction', 'hemarthrosis', 'fetal hypokinesia', " \
+        "'pulmonary hypoplasia').\n\n" \
+    "Decision rules:\n\n" \
+    "- If medical terminology is replaced with plain English, classify " \
+        "as Layperson.\n" \
+    "- If the synonym contains formal diagnostic, pathological, or " \
+        "anatomical terminology, classify as Expert.\n" \
+    "- Plain-English anatomical descriptions (e.g.,'middle finger bone', " \
+        "'white patch in the mouth', 'underdeveloped lung') should be " \
+        "classified as Layperson, even if medically accurate.\n" \
+    "- Classify based on the dominant wording of the synonym.\n" \
+    "- Use only the information provided.\n\n" \
+    "Output instructions:\n\n" \
+    f"Do not include explanations or any additional text. Output exactly " \
+        f"one word: '{laypersonSynonymType.capitalize()}' or " \
+        f"'{expertSynonymType}'."
