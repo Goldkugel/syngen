@@ -79,16 +79,43 @@ for bar in bars:
         va='bottom'
     )
 
-plt.xlabel("Source Type")
+plt.xlabel("Semantic Class")
 plt.ylabel("Count")
-plt.title("Count of Source Type")
+plt.title("Count of Semantic Classes")
 plt.grid(axis = "y")
 plt.show()
-plt.savefig(outputFileClassificationCounts, dpi = 300, 
+plt.savefig(outputFileClassificationGoldCounts, dpi = 300, 
     bbox_inches = "tight")
 
 classified_complete = classified_complete[classified_complete[classColumn].isin(evaluationClasses)].copy().reset_index(drop = True)
 
+
+
+
+
+
+classified = classified_complete[classColumn].isin([exactSynonymClass, relatedSynonymClass]).copy().reset_index(drop = True)
+
+# Count occurrences per system and classification
+# Count occurrences per system and classification
+classified = classified_complete[classColumn].isin([exactSynonymClass, relatedSynonymClass]).copy().reset_index(drop = True)
+counts = classified_complete.groupby([answerColumn, systemColumn]).size().unstack(fill_value = 0)
+
+# Create plot
+ax = counts.plot(kind = "bar", figsize = (3 * len(systems), 4), width = 0.8)
+
+# Add value labels above bars
+for container in ax.containers:
+    ax.bar_label(container, padding = 3)
+
+plt.xlabel("Classified Semantic Class")
+plt.ylabel("Count")
+plt.title("Count of Classified Semantic Class")
+plt.xticks(rotation = 0)
+plt.grid(axis = "y")
+plt.show()
+plt.savefig(outputFileClassificationAnswerCounts, dpi = 300, 
+    bbox_inches = "tight")
 
 
 

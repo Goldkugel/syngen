@@ -189,7 +189,33 @@ plt.ylabel("Count")
 plt.title("Count of Source Type")
 plt.grid(axis = "y")
 plt.show()
-plt.savefig(outputFileClassificationTypeCounts, dpi = 300, 
+plt.savefig(outputFileClassificationTypeGoldCounts, dpi = 300, 
+    bbox_inches = "tight")
+
+
+
+
+
+
+
+# Count occurrences per system and classification
+classified = classified_complete[typeColumn].isin([expertSynonymType, laypersonSynonymType]).copy().reset_index(drop = True)
+counts = classified_complete.groupby([answerColumn, systemColumn]).size().unstack(fill_value = 0)
+
+# Create plot
+ax = counts.plot(kind = "bar", figsize = (3 * len(systems), 4), width = 0.8)
+
+# Add value labels above bars
+for container in ax.containers:
+    ax.bar_label(container, padding = 3)
+
+plt.xlabel("Classified Source Type")
+plt.ylabel("Count")
+plt.title("Count of Classified Source Type")
+plt.xticks(rotation = 0)
+plt.grid(axis = "y")
+plt.show()
+plt.savefig(outputFileClassificationTypeAnswerCounts, dpi = 300, 
     bbox_inches = "tight")
 
 
@@ -516,6 +542,76 @@ if len(classified.index) > 0:
     plt.savefig(outputFileClassificationTypeEvaluationExactCHEBI, dpi = 300, bbox_inches = "tight")
 else:
     log("No CHEBI Data available.")
+
+
+
+
+
+
+classified              = classified_complete
+result = {}
+
+for index, row in classified.iterrows():
+    if row[typeColumn] is not None:
+        string = str(row[hpoidColumn]) + " " + str(row[contentColumn])
+
+        if string not in result.keys():
+            result[string] = {
+                "correct" : str(row[typeColumn])
+            }
+        
+        if row[answerColumn] in result[string].keys():
+            result[string][row[answerColumn]] = result[string][row[answerColumn]] + 1
+        else:
+            result[string][row[answerColumn]] = 1
+
+resultCount = {
+    "True Positive Layperson" : 0,
+    "True Positive Expert" : 0,
+    "True Negative Layperson" : 0,
+    "True Negative Expert" : 0,
+    "False Positive Layperson" : 0,
+    "False Positive Expert" : 0,
+    "False Negative Layperson" : 0,
+    "False Negative Expert" : 0,
+    "correct" : 0,
+    "correctVoteCount" : [0 for _ in range(0, len(systems))],
+    "voteCount" : [0 for _ in range(0, len(systems))]
+}
+for key in result.keys():
+    votes = 0
+    finalAnswer = ""
+
+    for answer in result[key].keys():
+        if isinstance(result[key][answer], int) and result[key][answer] >= votes:
+            votes = result[key][answer]
+            finalAnswer = answer
+            if result[key][answer] == votes:
+                log(f"Uncertain-Problem with {key}.")
+
+    if finalAnswer == result[key]["correct"]:
+        resultCount["correct"] = resultCount["correct"] + 1
+        resultCount["correctVoteCount"][votes] = resultCount["correctVoteCount"][votes] + 1
+        if finalAnswer == laypersonSynonymType:
+            resultCount["True Positive Layperson"] = resultCount["True Positive Layperson"] + 1
+            resultCount["True Negative Expert"] = resultCount["True Negative Expert"] + 1
+        else:
+            resultCount["True Positive Expert"] = resultCount["True Positive Expert"] + 1
+            resultCount["True Negative Layperson"] = resultCount["True Negative Layperson"] + 1
+    else:
+        if finalAnswer == laypersonSynonymType:
+            resultCount["False Positive Layperson"] = resultCount["False Positive Layperson"] + 1
+            resultCount["False Negative Expert"] = resultCount["False Negative Expert"] + 1
+        else:
+            resultCount["False Negative Layperson"] = resultCount["False Negative Layperson"] + 1
+            resultCount["False Positive Expert"] = resultCount["False Positive Expert"] + 1
+
+    resultCount["voteCount"][votes] = resultCount["voteCount"][votes] + 1
+
+log(str(resultCount))
+    
+
+# outputFileClassificationTypeEvaluationMajority
 
 
 

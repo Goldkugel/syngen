@@ -33,6 +33,28 @@ with newProgress() as progress:
 
     progress.refresh()
 
+log("Logging incorrect classified Synonyms...")
+
+gold        = readCSV(inputFileClassification)
+labels      = gold[gold[classColumn] == labelClass].copy().reset_index(drop = True)
+count       = 0
+
+for index, row in classified.iterrows():
+    # It should log, when:
+    # - The answer could not be formatted e.g. is undefined.
+    # - If the answer or the gold class is "exact" or "related" but the other 
+    #       is not equal.
+    # This way all "exact" and "related" terms classified the wrong way are
+    # being logged.
+    #
+    if (str(row[answerColumn]).lower() == undefinedSynonymType.lower() or
+        (str(row[answerColumn]).lower() != str(row[classColumn]).lower()) and
+            (str(row[answerColumn]).lower() in [exactSynonymClass, relatedSynonymClass] or
+             str(row[classColumn]).lower() in [exactSynonymClass, relatedSynonymClass])):
+        log(f"Label: \"{', '.join(getElements(labels, row[hpoidColumn], labelClass))}\", Synonym: \"{row[contentColumn]}\", Correct: \"{row[classColumn]}\", Classified: \"{row[answerColumn]}\"", cmdline = False)
+        count = count + 1
+
+
 
 
 
@@ -43,4 +65,4 @@ writeCSV(classified, outputFileClassificationFormatted)
 
 minutes         = int((time.time() - start_time) // 60)
 
-printHeader(f"Fomratting completed")
+printHeader(f"Formatting completed")

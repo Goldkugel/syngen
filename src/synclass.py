@@ -28,15 +28,14 @@ gold    = readCSV(inputFileClassificationType)
 
 
 synonyms = gold[gold[classColumn].isin(synonymClasses)].copy().reset_index(drop = True)
-
+hpoIDs = getHPOIDs(synonyms)
 parents = {}
 children = {}
 
 with newProgress() as progress:
+    
+    task = newTask(progress, len(hpoIDs), "Get Parents and Children")
 
-    task = newTask(progress, len(set(synonyms[hpoidColumn].tolist())), "Get Parents and Children")
-
-    hpoIDs = list(set(synonyms[hpoidColumn].tolist()))
     for hpoID in hpoIDs:
         children[hpoID] = getChildLabels(gold, hpoID)
         parents[hpoID]  = getParentLabels(gold, hpoID)
@@ -48,6 +47,8 @@ log(f"Set up the LLM ({model_id})...")
 model = Model(model=model_id)
 
 messages = []
+
+synonyms = synonyms[synonyms[hpoidColumn].isin(hpoIDs)].copy().reset_index(drop = True)
 
 with newProgress() as progress:
 

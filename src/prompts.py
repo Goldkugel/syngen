@@ -234,7 +234,57 @@ def getSynonymClassPrompt(
         children : list,
         synonym : str
 )-> str:
-    return \
+    return f"""
+You are an expert in biomedical terminology and ontologies. 
+
+Your task is to decide whether the given synonym is an "Exact" synonym or a "Related" synonym of the concept label.
+
+Definitions:
+
+- Exact: The synonym describes exactly the same phenotype and can replace the concept label in medical text without changing the meaning, e.g., "Focal myoclonic seizure" vs. "Partial myoclonic seizure".
+- Related: The synonym is associated with the concept but refers to a different concept, a broader class, a narrower class, or a commonly associated entity, e.g., "Myocardial infarction" vs. "Coronary artery disease".
+
+Important ontology rules:
+
+Classify as "Related" if the synonym is:
+- a chemical formula (e.g., H2N-CH2-COOH)
+- a chemical systematic name
+- a chemical identifier or registry name
+- a molecular abbreviation (e.g., Gly, ALA, 5-HT)
+- a gene or protein symbol
+- a short acronym or abbreviation
+- a plural or grammatical variant (e.g., ion vs ions)
+- a Latin anatomical name (e.g., nodus lymphaticus)
+- a broader or more generic term
+- a narrower subtype
+- a commonly associated condition
+- a cause or consequence of the phenotype
+
+Classify as "Exact" if the synonym:
+- describes the same phenotype using different wording
+- is a clinical paraphrase with identical meaning
+- is a reordered phrase with the same meaning
+- replaces words with equivalent medical terms (e.g., hypoplasia vs underdevelopment)
+- describes the same anatomical abnormality
+
+Information regarding the HPO concept:
+
+Concept label: {quote(label)}
+Definition: {quote(definition)}
+Parent concept labels: {applyFormat(parents)}
+Child concept labels: {applyFormat(children)}
+Comment (may be empty): {quote(comment)}
+
+Information regarding the synonym to classify:
+
+Synonym to classify: {quote(synonym)}
+
+Important: 
+
+- Return only one word as the output: "Exact" or "Related".
+"""
+
+"""
     "Your Task:\n\n" \
     "You are given a primary Human Phenotype Ontology (HPO) concept and a " \
         "candidate synonym. Using only the information provided and HPO " \
@@ -267,12 +317,12 @@ def getSynonymClassPrompt(
         "vaguer.\n" \
     "- Size, projection, prominence, and excess are interchangeable in " \
         "dysmorphology: Terms such as large, big, enlarged, prominent, " \
-        "projecting, excess, hyperplasia are \"Exact\⅛ when they refer to " \
+        "projecting, excess, hyperplasia are \"Exact\" when they refer to " \
         "the same anatomical structure and direction of change.\n" \
     "- Anatomical shorthand is acceptable: Closely related anatomical terms " \
         "commonly used interchangeably in phenotype annotation (e.g., " \
         "\"jaw\" ↔ \"mandible\", \"nasal ridge\" ↔ \"nasal dorsum\") are " \
-        "\"Exact\⅛ unless a clear exclusion is stated.\n" \
+        "\"Exact\" unless a clear exclusion is stated.\n" \
     "- Laboratory proxies and functional readouts may be \"Exact\": If a " \
         "laboratory measurement or functional descriptor is the standard " \
         "phenotypic manifestation of the label, classify as \"Exact\" even " \
@@ -309,6 +359,7 @@ def getSynonymClassPrompt(
     "Output exactly one of the following and nothing else: \"Exact\", " \
         "\"Broad\", \"Narrow\", and \"Related\"\n." \
     "Do not include explanations or reasoning."
+"""
 
 def getSynonymTypePrompt(
         label : str, 
@@ -366,3 +417,84 @@ def getSynonymTypePrompt(
     f"Do not include explanations or any additional text. Output exactly " \
         f"one word: '{laypersonSynonymType.capitalize()}' or " \
         f"'{expertSynonymType}'."
+
+"""
+    "Your Task:\n\n" \
+    "You are given information about a primary Human Phenotype Ontology " \
+        "(HPO) concept and a candidate synonym.\n\n" \
+    "Your task is to classify the candidate synonym according to its " \
+        "language register ONLY — not its semantic correctness and not its " \
+        "relationship to the primary label.\n\n" \
+    "IMPORTANT:\n\n" \
+    "This is strictly a linguistic register task.\n" \
+    "The fact that a term refers to a medical condition does NOT make " \
+        "it \"Expert\".\n" \
+    "Classify based on wording style, not subject matter.\n" \
+    "Ignore the wording of the primary HPO label when determining register.\n" \
+    "Evaluate ONLY the candidate synonym.\n\n" \
+    "CORE PRINCIPLE:\n\n" \
+    "\"Expert\": specialist medical terminology intended for professional " \
+        "communication.\n" \
+    "\"Layperson\": plain English wording that could naturally appear in " \
+        "patient-facing or general public communication.\n\n" \
+    "This task is about HOW the phrase is written, not what it refers to.\n\n" \
+    "MORPHOLOGY GUIDANCE:\n\n" \
+    "Strong indicators of \"Expert\":\n" \
+    "\t- Greek or Latin diagnostic suffixes (e.g., -itis, -oma, -osis, " \
+        "-emia, -pathy, -plegia, -megaly, -penia, -cephaly).\n" \
+    "\t- Formal anatomical or pathological terminology primarily used in " \
+        "professional contexts.\n" \
+    "\t- Standardized clinical disease names.\n\n" \
+    "Strong indicators of \"Layperson\":\n" \
+    "\t- Common everyday English words (e.g., liver, tumor, cancer, failure, " \
+        "rupture, finger, nail, bladder, bowel, leg).\n" \
+    "\t- Descriptive constructions like:\n" \
+    "\t\t- \"inflammation of ...\"\n" \
+    "\t\t- \"tumor of ...\"\n" \
+    "\t\t- \"failure\"\n" \
+    "\t\t- \"shortening\"\n" \
+    "\t\t- \"duplication\"\n" \
+    "\t\t- \"abnormality of ...\"\n" \
+    "\t\t- \"difference in ...\"\n" \
+    "\t\t- Plain descriptive phrasing without specialized suffixes\n\n" \
+    "The following words are NOT automatically Expert:\n" \
+    "tumor, cancer, failure, rupture, inflammation, duplication, " \
+        "abnormality, shortening, asymmetry, hernia.\n" \
+    "Formal grammatical structure (e.g., \"Abnormality of X\", \"Rupture " \
+        "of Y\") does NOT make a term Expert if it uses plain English " \
+        "vocabulary.\n\n" \
+    "DECISION PROCESS:\n\n" \
+    "Step 1:\n" \
+    "Does the synonym contain specialized Greek/Latin medical morphology or " \
+        "standardized diagnostic terminology?\n" \
+    "\t- If YES, then classify it as \"Expert\".\n" \
+    "\t- If NO, then go to Step 2.\n" \
+    "Step 2:\n" \
+    "Is the synonym written in plain descriptive English that could " \
+        "plausibly be used by a patient speaking to a doctor?\n" \
+    "- If YES, then classify as Layperson.\n" \
+    "- If you are unsure then prefer Layperson unless clear specialist " \
+        "terminology is present.\n\n" \
+    "CLASS DEFINITIONS\n\n" \
+    "\"Layperson\": Uses everyday, non-technical language understandable to " \
+        "the general public. May describe medical conditions, but avoids " \
+        "specialist morphological terminology.\n" \
+    "\"Expert\": Uses technical, clinical, anatomical, Greek/Latin-derived, " \
+        "or standardized medical terminology intended primarily for " \
+        "healthcare professionals or researchers.\n\n" \
+    "Primary HPO concept:\n\n" \
+    f"- Label: {quote(label)}\n" \
+    f"- Definition: {quote(definition)}\n" \
+    f"- Comment: {quote(comment)}\n" \
+    f"- Parent concept(s): {applyFormat(parents)}\n" \
+    f"- Child concept(s): {applyFormat(children)}\n\n" \
+    "Candidate synonym:\n\n" \
+    f"- Label: {quote(synonym)}\n\n" \
+    "OUTPUT INSTRUCTIONS:\n\n" \
+    "Do not include explanations or additional text.\n" \
+    "Output exactly one word:\n\n" \
+    "\"Layperson\"" \
+    "\"Expert\""
+"""
+
+

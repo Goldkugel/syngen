@@ -8,7 +8,7 @@ generateTimes = 300
 
 generateEmbeddings = False
 
-reduceToTestIDs = False
+reduceToTestIDs = True
 
 # =============================================================================
 # Model Configuration
@@ -37,9 +37,9 @@ if len(sys.argv) > 2:
 
 # Float that controls the cumulative probability of the top tokens to consider.
 # Must be in (0, 1]. Set to 1 to consider all tokens.
-top_p=1
+top_p=0.95
 
-max_model_len = 0.5 * 8192
+max_model_len = 2 * 2048
 max_num_batched_tokens = 2 * max_model_len
 
 # Float that controls the randomness of the sampling. Lower values make the 
@@ -48,7 +48,7 @@ max_num_batched_tokens = 2 * max_model_len
 temperature = 0.01
 
 # Maximum number of tokens to generate per output sequence.
-max_tokens = 2 * 2048
+max_tokens = 1024
 
 # Random seed to use for the generation
 seed = 2898231092
@@ -95,7 +95,7 @@ messageRoleElement = "role"
 messageTextElement = "message"
 
 headerChar = "="
-headerLen = 120
+headerLen = 60
 headerSeparator = headerChar * headerLen
 
 progressBarColor = "cyan"
@@ -130,7 +130,7 @@ relatedSynonymClass             = "related"
 broadSynonymClass               = "broad"
 narrowSynonymClass              = "narrow"
 
-synonymClasses = [exactSynonymClass, relatedSynonymClass, broadSynonymClass, narrowSynonymClass]
+synonymClasses = [exactSynonymClass, relatedSynonymClass]#, broadSynonymClass, narrowSynonymClass]
 
 expertSynonymType               = "expert"
 laypersonSynonymType            = "layperson"
@@ -444,12 +444,12 @@ outputFileClassificationMerged                  = os.path.join(
 
 inputFileClassificationEvaluation               = outputFileClassificationMerged
 
-outputFileNameClassificationCounts   = f"{outputFolderNameClassification}_counts.{plotFileFormat}"
-outputFileClassificationCounts       = os.path.join(
+outputFileNameClassificationGoldCounts   = f"{outputFolderNameClassification}_gold_counts.{plotFileFormat}"
+outputFileClassificationGoldCounts       = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameEvaluation,
-    outputFileNameClassificationCounts
+    outputFileNameClassificationGoldCounts
 )
 
 evaluationClasses = [exactSynonymClass, relatedSynonymClass]
@@ -460,6 +460,14 @@ outputFileClassificationRecallPrecisionF1 = os.path.join(
     outputFolderName,
     outputFolderNameEvaluation,
     outputFileNameClassificationRecallPrecisionF1
+)
+
+outputFileNameClassificationAnswerCounts   = f"{outputFolderNameClassification}_answer_counts.{plotFileFormat}"
+outputFileClassificationAnswerCounts = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationAnswerCounts
 )
 
 outputFileNameClassificationEvaluationExact     = f"{outputFolderNameClassification}_exact_evaluation.{plotFileFormat}"
@@ -565,15 +573,23 @@ outputFileClassificationTypeMerged                  = os.path.join(
 
 inputFileClassificationTypeEvaluation               = outputFileClassificationTypeMerged
 
-outputFileNameClassificationTypeCounts   = f"{outputFolderNameClassificationType}_counts.{plotFileFormat}"
-outputFileClassificationTypeCounts       = os.path.join(
+outputFileNameClassificationTypeGoldCounts   = f"{outputFolderNameClassificationType}_gold_counts.{plotFileFormat}"
+outputFileClassificationTypeGoldCounts       = os.path.join(
     dataDir,
     outputFolderName,
     outputFolderNameEvaluation,
-    outputFileNameClassificationTypeCounts
+    outputFileNameClassificationTypeGoldCounts
 )
 
-outputFileNameClassificationTypeRecallPrecisionF1   = f"{outputFolderNameClassificationType}_base_evaluation_threshold.{plotFileFormat}"
+outputFileNameClassificationTypeAnswerCounts   = f"{outputFolderNameClassificationType}_answer_counts.{plotFileFormat}"
+outputFileClassificationTypeAnswerCounts = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeAnswerCounts
+)
+
+outputFileNameClassificationTypeRecallPrecisionF1   = f"{outputFolderNameClassificationType}_base_evaluation.{plotFileFormat}"
 outputFileClassificationTypeRecallPrecisionF1       = os.path.join(
     dataDir,
     outputFolderName,
@@ -629,9 +645,17 @@ outputFileClassificationTypeEvaluationExactCHEBI      = os.path.join(
     outputFileNameClassificationTypeEvaluationExactCHEBI
 )
 
+outputFileNameClassificationTypeEvaluationMajority  = f"{outputFolderNameClassificationType}_majority_voting.{plotFileFormat}"
+outputFileClassificationTypeEvaluationMajority      = os.path.join(
+    dataDir,
+    outputFolderName,
+    outputFolderNameEvaluation,
+    outputFileNameClassificationTypeEvaluationMajority
+)
+
 # =============================================================================
 
-testIDs = list(set([
+testIDs_old = list(set([
     'HP:0001756', 'HP:0003189', 'HP:0000708', 'HP:0008069', 'HP:0009778'
     'HP:0008331', 'HP:0007165', 'HP:0002020', 'HP:0010759', 'HP:0002659',
     'HP:0009891', 'HP:0007018', 'HP:0032514', 'HP:0000434', 'HP:0000692', 
@@ -720,3 +744,104 @@ testIDs = list(set([
     'HP:0001852', 'HP:0007968', 'HP:0000592', 'HP:0009843', 'HP:0005272',
     'HP:0004331', 'HP:0011153', 'HP:0003155', 'HP:0000437'
 ]))
+
+testIDs = [         'CHEBI:4167',       'UBERON:0006440',   'CHEBI:23449',
+ 'UBERON:0005010',  'CHEBI:3892',       'CHEBI:50112',      'CHEBI:17883',
+ 'HP:0100171',      'CHEBI:32612',      'CHEBI:18258',      'HP:0008067',
+ 'UBERON:0004938',  'CHEBI:76871',      'UBERON:0000933',   'GO:1905155',
+ 'CHEBI:33424',     'HP:0025780',       'UBERON:0002369',   'CHEBI:35366',
+ 'UBERON:0002020',  'UBERON:0004998',   'HP:0100439',       'UBERON:0001489',
+ 'UBERON:0006052',  'HP:0200153',       'PR:000001968',     'CHEBI:18257',
+ 'UBERON:0004230',  'GO:1904747',       'UBERON:0003635',   'HP:0011117',
+ 'UBERON:0010948',  'CHEBI:32563',      'CHEBI:17196',      'UBERON:0005019',
+ 'UBERON:0002386',  'CHEBI:37024',      'CL:0000981',       'PR:000001006',
+ 'UBERON:0006946',  'CHEBI:15681',      'UBERON:0004066',   'UBERON:0003625',
+ 'UBERON:0005969',  'CHEBI:37848',      'CHEBI:16134',      'CHEBI:35219',
+ 'GO:1904746',      'CHEBI:16113',      'UBERON:0006858',   'HP:0006505',
+ 'UBERON:0009472',  'CHEBI:17933',      'HP:0000327',       'CHEBI:48376',
+ 'CHEBI:133608']
+
+testIDs2 = [         'HP:0020059',       'UBERON:0002318',   'HP:0012490',
+ 'CHEBI:28044',     'CHEBI:59549',      'UBERON:0007779',   'GO:1901731', 
+ 'HP:0004401',      'UBERON:0006274',   'HP:0000723',       'CHEBI:134251', 
+ 'UBERON:0001183',  'HP:6000451',       'HP:0002813',       'UBERON:0006652', 
+ 'CHEBI:27311',     'CHEBI:73558',      'HP:0005609',       'HP:0000690', 
+ 'HP:0012071',      'UBERON:0004316',   'CL:0000971',       'PR:000001318', 
+ 'HP:0100121',      'CHEBI:26607',      'UBERON:0003837',   'CL:0002104', 
+ 'CHEBI:35219',     'UBERON:0001601',   'HP:0012225',       'UBERON:0009984', 
+ 'HP:0009931',      'UBERON:0004066',   'UBERON:0002352',   'UBERON:0008594',
+ 'CHEBI:28616',     'HP:0000322',       'UBERON:0003663',   'HP:0025693', 
+ 'CL:0000748',      'UBERON:0006075',   'HP:0100094',       'UBERON:0006810', 
+ 'UBERON:0002326',  'CHEBI:23116',      'CHEBI:46662',      'HP:0100072', 
+ 'UBERON:0004734',  'HP:0031353',       'CHEBI:35679',      'HP:0010077', 
+ 'CHEBI:37808',     'UBERON:0003450',   'CHEBI:25235',      'HP:0010744',
+ 'UBERON:0001534',  'HP:0100056',       'CHEBI:50315',      'HP:0002398',
+ 'CHEBI:35137',     'UBERON:0005454',   'HP:0008724',       'CHEBI:48359',
+ 'CHEBI:28600',     'UBERON:0000168',   'UBERON:0001543',   'HP:0001392',
+ 'HP:0030835',      'UBERON:0006946',   'HP:0006611',       'CHEBI:9300',
+ 'UBERON:0003533',  'CHEBI:38807',      'HP:0100192',       'CHEBI:27891',
+ 'CHEBI:90318',     'UBERON:0012367',   'HP:0004370',       'UBERON:0004292',
+ 'HP:0002571',      'CHEBI:15756',      'HP:0002846',       'CHEBI:58389',
+ 'HP:0009182',      'UBERON:0006722',   'UBERON:0006858',   'CL:0000169',
+ 'CHEBI:33250',     'PR:000001006',     'HP:0009554',       'CHEBI:50733',
+ 'CHEBI:356416',    'GO:0004565',       'CHEBI:28842',      'CHEBI:33552',
+ 'GO:0050769',      'UBERON:0007241',   'UBERON:0005010',   'CHEBI:37024', 
+ 'HP:0030445',      'GO:0051130',       'HP:0002681',       'UBERON:0007567',
+ 'HP:0000745',      'PR:000001255',     'CHEBI:35269',      'UBERON:0012072',
+ 'CHEBI:48376',     'UBERON:0000015',   'GO:0003857',       'CHEBI:16113',
+ 'CHEBI:46787',     'CHEBI:16831',      'CHEBI:36309',      'CHEBI:63624',
+ 'CHEBI:15681',     'HP:0001991',       'UBERON:0002483',   'HP:0005280',
+ 'GO:0004930',      'UBERON:0000998',   'UBERON:0018413',   'HP:6000643',
+ 'UBERON:0001740',  'HP:0010109',       'CHEBI:58496',      'HP:0003191',
+ 'UBERON:0019200',  'UBERON:0009472',   'HP:0002863',       'UBERON:0004122',
+ 'CHEBI:78804',     'HP:6001162',       'HP:0011744',       'UBERON:0002059',
+ 'UBERON:0001985',  'UBERON:0004470',   'UBERON:0009680',   'UBERON:0004941',
+ 'HP:0006339',      'UBERON:0010952',   'HP:0025347',       'UBERON:0002240',
+ 'HP:0020150',      'UBERON:0018415',   'HP:0003233',       'CHEBI:133608',
+ 'UBERON:0003729',  'UBERON:0002453',   'CHEBI:27026',      'UBERON:0008785',
+ 'CHEBI:33662',     'PR:000001308',     'UBERON:0006645',   'HP:0009521',
+ 'UBERON:0006440',  'CHEBI:35821',      'UBERON:0012314',   'UBERON:0001567',
+ 'UBERON:0000401',  'UBERON:0013757',   'UBERON:0000200',   'UBERON:0003066',
+ 'HP:0002637',      'UBERON:0004148',   'CHEBI:76713',      'CHEBI:26078',
+ 'CHEBI:23449',     'UBERON:0004175',   'HP:0000654',       'HP:0012537',
+ 'GO:0065003',      'UBERON:0010948',   'CHEBI:140325',     'HP:0010750',
+ 'CHEBI:16375',     'CHEBI:48560',      'CHEBI:59888',      'CHEBI:16199',
+ 'UBERON:0004704',  'HP:0100742',       'UBERON:0008585',   'UBERON:0002125',
+ 'GO:2000253',      'HP:0002239',       'HP:0001852',       'HP:0025321',
+ 'HP:0000973',      'CHEBI:58080',      'UBERON:0005969',   'UBERON:0002382',
+ 'GO:0045787',      'UBERON:0004367',   'UBERON:0005043',   'CHEBI:37257',
+ 'UBERON:0003625',  'HP:0004936',       'HP:0005306',       'CHEBI:17368',
+ 'GO:0009056',      'UBERON:0002529',   'UBERON:0003930',   'UBERON:0014454',
+ 'GO:0006915',      'CHEBI:43474',      'CHEBI:26816',      'HP:0010956',
+ 'HP:0000482',      'GO:0051726',       'HP:0025448',       'HP:0012576',
+ 'CHEBI:30769',     'UBERON:0007617',   'CHEBI:17203',      'CHEBI:17033',
+ 'HP:0001658',      'PR:000001968',     'CHEBI:83820',      'HP:0001989',
+ 'CHEBI:11851',     'HP:0034581',       'UBERON:0035804',   'CHEBI:60065',
+ 'UBERON:0004067',  'HP:0002206',       'UBERON:0009914',   'UBERON:0003301',
+ 'UBERON:0006660',  'CHEBI:18258',      'UBERON:0004275',   'HP:0011072',
+ 'UBERON:0003283',  'UBERON:0001304',   'UBERON:0007827',   'CHEBI:18259',
+ 'UBERON:0013767',  'PR:000016401',     'HP:0010385',       'HP:0000327',
+ 'CHEBI:16015',     'HP:0032360',       'UBERON:8410001',   'UBERON:0002076',
+ 'HP:0025289',      'UBERON:0003846',   'UBERON:0002033',   'HP:0003029', 
+ 'UBERON:0002094',  'HP:0007924',       'GO:0042101',       'HP:0012763',
+ 'GO:0050801',      'UBERON:0004913',   'CHEBI:33568',      'HP:0045043',
+ 'PATO:0002324',    'GO:1904746',       'CHEBI:38180',      'CHEBI:64570',
+ 'HP:0410058',      'UBERON:0015789',   'UBERON:0003635',   'CHEBI:21547',
+ 'CHEBI:17272',     'UBERON:0004223',   'CHEBI:30745',      'CHEBI:139589',
+ 'HP:0001732',      'CHEBI:83925',      'UBERON:0001161',   'UBERON:0001125',
+ 'UBERON:0001224',  'HP:0012878',       'HP:0009154',       'CHEBI:32507',
+ 'GO:1903524',      'CHEBI:22653',      'CHEBI:65065',      'CHEBI:17634',
+ 'HP:0005997',      'UBERON:0003481',   'HP:0009213',       'UBERON:0004997',
+ 'HP:0012893',      'UBERON:0010273',   'GO:0030217',       'HP:0011093',
+ 'CL:0000049',      'HP:0002538',       'HP:0009459',       'CHEBI:3892',
+ 'CHEBI:24621',     'HP:0200154',       'UBERON:0013501',   'HP:6000414',
+ 'UBERON:0004228',  'HP:0030140',       'HP:0034491',       'UBERON:0003553',
+ 'HP:0000970',      'UBERON:0005185',   'UBERON:0001507',   'GO:1904099',
+ 'UBERON:0002149',  'UBERON:0016526',   'CHEBI:33558',      'UBERON:0014872',
+ 'UBERON:0011215',  'UBERON:0005028',   'HP:0031170',       'CHEBI:58001',
+ 'UBERON:0002516',  'CHEBI:17053',      'CHEBI:60039',      'GO:0009057', 
+ 'UBERON:0011132',  'HP:5200273',       'HP:0000653',       'GO:1904747',
+ 'HP:0034079',      'CHEBI:3424',       'HP:0006155',       'HP:0033842',
+ 'HP:0005550',      'UBERON:0002416',   'UBERON:0004445',   'CHEBI:35191',
+ 'UBERON:0001562',  'GO:1903771',       'CHEBI:138675',     'CHEBI:28789',
+ 'GO:1901657',      'PR:000001004',     'UBERON:0002400']
