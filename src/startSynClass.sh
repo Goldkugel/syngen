@@ -1,15 +1,17 @@
-GPUS="5,6"
+GPUS="0,1"
+
+# python3 ./synclass.py "google/medgemma-27b-text-it" "0,1"
 
 MODELS=(
-  "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
-  "mistralai/Mistral-7B-Instruct-v0.2"
-  "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
-  "Qwen/Qwen3-4B-Instruct-2507"
+  #"google/medgemma-4b-it"
+  #"Qwen/Qwen3-4B-Instruct-2507"
+  #"mistralai/Mistral-7B-Instruct-v0.2"
+  #"mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+  #"Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
   "google/medgemma-27b-text-it"
-  "google/medgemma-4b-it"
 )
 
-python3 "transform.py"
+[ -f "../data/output/transform/transform.csv" ] || python3 "transform.py"
 
 for MODEL in "${MODELS[@]}"; do
   python3 ./synclass.py "$MODEL" "$GPUS"

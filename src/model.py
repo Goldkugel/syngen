@@ -70,7 +70,8 @@ class Model:
         log(f"Max new Tokens: {max_tokens}")
         log(f"Temperature: {temperature}")
         log(f"Max Model Length: {max_model_len}")
-        log(f"GPUs: '{', '.join(gpu_id.split(','))}'")
+        joinString = '\', \''
+        log(f"GPUs: '{joinString.join(gpu_id.split(','))}'")
 
     def addPrompt(self, role : str = userRole, message : list = []) -> int:
         """

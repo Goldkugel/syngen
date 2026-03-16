@@ -42,10 +42,23 @@ labels      = gold[gold[classColumn] == labelClass].copy().reset_index(drop = Tr
 count       = 0
 
 for index, row in classified.iterrows():
+    # It should log, when:
+    # - The answer could not be formatted e.g. is undefined.
+    # - No type in the gold dataset means "expert", therefore having an empty
+    #       type column and an answer that is not "expert" means wrong
+    #       classification.
+    # - If the type is direct, it just means that the source of the synonym is
+    #       found in the class, not in the axioms, and therefore the type in 
+    #       gold dataset is "expert". If the answer is not "expert" means wrong
+    #       classification. 
+    # - If the answer or the gold class is "layperson" but the other is not.
+    # This way all "layperson" and "expert" terms classified the wrong way are
+    # being logged.
+    #
     if (str(row[answerColumn]).lower() == undefinedSynonymType.lower() or
-        (str(row[answerColumn]).lower() != exactSynonymClass and row[typeColumn] == "") or
-        (str(row[answerColumn]).lower() != exactSynonymClass and row[typeColumn] == directSynonymType) or
-        ((str(row[answerColumn]).lower() != row[typeColumn] == laypersonSynonymType) and (str(row[answerColumn]).lower() == laypersonSynonymType or row[typeColumn] == laypersonSynonymType))):
+        (str(row[answerColumn]).lower() != expertSynonymType and row[typeColumn] == "") or
+        (str(row[answerColumn]).lower() != expertSynonymType and row[typeColumn] == directSynonymType) or
+        ((str(row[answerColumn]).lower() != row[typeColumn] and row[typeColumn] == laypersonSynonymType) and (str(row[answerColumn]).lower() == laypersonSynonymType or row[typeColumn] == laypersonSynonymType))):
         log(f"Label: \"{', '.join(getElements(labels, row[hpoidColumn], labelClass))}\", Synonym: \"{row[contentColumn]}\", Correct: \"{row[typeColumn]}\", Classified: \"{row[answerColumn]}\"", cmdline = False)
         count = count + 1
 

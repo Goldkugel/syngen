@@ -100,11 +100,38 @@ log("Removing Empty Content Rows...")
 # Remove rows where the content column is empty or NaN
 data = (
     data[data[contentColumn] != ""]
-    .dropna(subset = [contentColumn])
+    .dropna(subset = [contentColumn, hpoidColumn])
     .reset_index(drop = True)
 )
 
 log(f"Removed {rowCount - len(data.index)} Rows due to Empty Content.")
+
+log("Converting terms to lower case...")
+
+with newProgress() as progress:
+   
+    task = newTask(progress, len(data.index), "Converting to lower case")
+    c = ([labelClass] + synonymClasses)
+    for index, row in data.iterrows():
+        
+        if row[classColumn] in c:
+            data.loc[index, contentColumn] = str(data[contentColumn][index]).lower()
+        progress.update(task, advance = 1)
+    
+    progress.refresh()
+
+log("Terms were converted to lower case.")
+
+
+rowCount = len(data.index)
+log("Removing synonyms having a match with labels...")
+data["tmp"] = data[hpoidColumn].astype(str) + data[contentColumn].astype(str)
+labeldata = data.loc[data[classColumn] == labelClass, "tmp"].tolist()
+data = data[
+    (~data[classColumn].isin(synonymClasses)) |
+    (~data["tmp"].isin(labeldata))
+].reset_index(drop = True).drop('tmp', axis = 1).copy()
+log(f"Removed {rowCount - len(data.index)} synonyms due to having a match with their label.")
 
 printRowCount(data)
 printDataSummary(data)
@@ -145,37 +172,22 @@ if len(testIDs) > 0:
     # Reduce content to only the selected HPO concepts
     # ------------------------------------------------------------------------------
 
-    result = []
-
-    # Use a progress bar to track processing of each HPO ID
-    with newProgress() as progress:
-        task = newTask(progress, len(hpoIDs), "Reduce Content")
-
-        for hpoID in hpoIDs:
-            # Collect all relevant entries for the given HPO ID
-            result.append(checkEntries(data, hpoID))
-            progress.update(task, advance = 1)
-
-        progress.refresh()
-
-    # Merge reduced content back into a single DataFrame
-    log("Merging Data...")
-    data = pd.concat(result).reset_index(drop = True)
-    log(f"Content Reduced by {rowCount - len(data.index)} Rows.")
+    result = data[data[hpoidColumn].isin(hpoIDs)].copy().reset_index(drop = True)
+    log(f"Content Reduced by {rowCount - len(result.index)} Rows.")
 
     # ------------------------------------------------------------------------------
     # Output summary statistics
     # ------------------------------------------------------------------------------
 
-    printRowCount(data)
-    printDataSummary(data)
+    printRowCount(result)
+    printDataSummary(result)
 
     # ------------------------------------------------------------------------------
     # Persist transformed data to disk
     # ------------------------------------------------------------------------------
 
     log("Write reduced transformated Data...")
-    writeCSV(data, outputFileTransformed)
+    writeCSV(result, outputFileTransformed)
     log("Reduced transformed Data written.")
 
 
