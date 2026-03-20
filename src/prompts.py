@@ -6,6 +6,244 @@ sys.dont_write_bytecode = True
 # Import necessary modules and configuration settings
 from config import *
 
+def semanticClassificationPrompt1(
+        label : str, 
+        definition : str, 
+        comment : str,  
+        parents : list,
+        children : list
+) -> str:
+    return \
+    "You are a biomedical ontology curator working with the Human Phenotype " \
+        "Ontology (HPO).\n\n" \
+    "Please, interpret the meaning and scope of the following HPO concept " \
+        "using the provided ontology information.\n\n" \
+    f"Label: {quote(label)}\n" \
+    f"Definition: {quote(definition)}\n" \
+    f"Parent Concept Labels: {applyFormat(parents)}\n" \
+    f"Child Concept Labels: {applyFormat(children)}\n" \
+    f"Comment: {quote(comment)}\n\n" \
+    "Explain:\n\n" \
+    "1. The phenotype described by the concept.\n" \
+    "2. The scope of the concept based on the ontology hierarchy."
+
+def semanticClassificationPrompt2(
+    synonym : str
+) -> str:
+    return \
+    "Please, interpret the biomedical meaning of the following term.\n\n" \
+    f"Term: {quote(synonym)}\n" \
+    "Explain what phenotype, condition, or clinical " \
+        "description this term usually refers to in biomedical or " \
+        "clinical terminology."
+
+def semanticClassificationPrompt3() -> str:
+    return \
+    "Now, please assist with ontology curation in the Human Phenotype " \
+        "Ontology (HPO).\n\n" \
+    "Compare the meaning of the HPO concept and the term that I gave you.\n\n" \
+    "Please explain how the term relates to the concept.\n\n" \
+    "Consider whether the term:\n\n" \
+    "- has identical meaning\n" \
+    "- has a broader meaning than the concept\n" \
+    "- has a narrower meaning than the concept\n" \
+    "- refers to a related condition\n" \
+    "- describes a cause or consequence\n" \
+    "- omits important aspects of the concept definition\n\n" \
+    "Important scope check:\n\n" \
+    "Determine whether the term captures the full phenotype described by " \
+        "the concept definition.\n\n" \
+    "Specifically check whether the term:\n\n" \
+    "- omits key characteristics of the concept\n" \
+    "- describes only a general manifestation of the concept\n" \
+    "- represents a broader clinical description\n" \
+    "- represents a more specific subtype of the concept\n\n" \
+    "If the term omits defining features or represents a broader or narrower " \
+        "phenotype, it should not be considered semantically identical to " \
+        "the concept."
+
+def semanticClassificationPrompt4(fewShot : bool = False) -> str:
+    ret = \
+    "Finally, classify the term according to the official HPO synonym " \
+        "definitions.\n\n" \
+    "HPO synonym definitions:\n\n" \
+    "\"Exact\": Exact synonyms can be used interchangeably. One synonym " \
+        "can replace the other without changing the meaning. Example: " \
+        "\"Focal myoclonic seizure\" and \"Partial myoclonic seizure\".\n" \
+    "\"Related\": Related synonyms are conceptually related but not exactly " \
+        "interchangeable. One synonym does not replace the other. Example: " \
+        "\"Myocardial infarction\" and \"Coronary artery disease\". " \
+        "\"Coronary artery disease\" is an underlying condition that may " \
+        "lead to, but does not necessarily imply, a \"myocardial " \
+        "infarction\".\n\n" \
+    "Important ontology synonym rules:\n\n" \
+    "In biomedical ontologies, lexical similarity does NOT automatically " \
+        "imply an Exact synonym.\n\n" \
+    "The following types of terms should usually be classified as " \
+        "\"Related\":\n\n" \
+    "- Abbreviations or short forms\n" \
+    "- Chemical formulas or structural formulas\n" \
+    "- Systematic chemical names vs common names\n" \
+    "- Translations into other languages\n" \
+    "- Singular vs plural variants\n" \
+    "- Identifiers or codes\n\n" \
+    "These should be classified as Related unless the synonym is literally " \
+        "interchangeable in normal biomedical text.\n\n" \
+    "Decision rules:\n\n" \
+    "- identical meaning → Exact\n" \
+    "- broader or narrower → Related\n" \
+    "- cause, consequence, or associated condition → Related\n" \
+    "- partial overlap or uncertainty → Related\n\n" \
+    "Before deciding, ask yourself:\n\n" \
+    "Would replacing the concept label with the synonym always produce a " \
+        "natural biomedical sentence?\n\n" \
+    "If the substitution would look unusual, abbreviated, overly technical, " \
+        "or language-specific, classify it as \"Related\".\n\n"
+    
+    if fewShot:
+        ret = ret + "Examples:\n\n" \
+            "- The term \"calcifediolum\" is classified as \"Related\" to " \
+                "the concept with the label \"calcidiol\".\n" \
+            "- The term \"2,5-diaminopentanoic acid\" is classified as " \
+                "\"Exact\" to the concept with the label \"ornithine\".\n" \
+            "- The term \"double negative memory B-lymphocyte\" is " \
+                "classified as \"Exact\" to the concept with the label " \
+                "\"double negative memory B cell\".\n" \
+            "- The term \"upregulation of membrane invagination\" is " \
+                "classified as \"Exact\" to the concept with the label " \
+                "\"positive regulation of membrane invagination\".\n" \
+            "- The term \"Hypotrophic maxilla\" is classified as \"Related\" " \
+                "to the concept with the label \"Hypoplasia of the " \
+                "maxilla\".\n" \
+            "- The term \"Upper jaw retrusion\" is classified as \"Exact\" " \
+                "to the concept with the label \"Hypoplasia of the " \
+                "maxilla\".\n" \
+            "- The term \"fore epipodium\" is classified as \"Related\" to " \
+                "the concept with the label \"forelimb zeugopod\".\n" \
+            "- The term \"5th digit of hand\" is classified as \"Exact\" to " \
+                "the concept with the label \"manual digit 5\".\n\n"
+    
+    ret = ret + "Please answer only with a valid JSON object containing:\n\n" \
+        "{\n" \
+        f"{quote(synonymClass)}: \"Exact\" | \"Related\",\n" \
+        f"{quote(confidenceColumn)}: <number between 0 and 10>\n" \
+        "}"
+
+    return ret
+
+def semanticClassificationPrompt(
+        label : str, 
+        definition : str, 
+        comment : str, 
+        parents : list, 
+        children : list,
+        synonym : str
+)-> str:
+    return f"""
+You are an expert in biomedical terminology and ontologies. 
+
+Your task is to decide whether the given synonym is an "Exact" synonym or a "Related" synonym of the concept label.
+
+Definitions:
+
+- Exact: The synonym describes exactly the same phenotype and can replace the concept label in medical text without changing the meaning, e.g., "Focal myoclonic seizure" vs. "Partial myoclonic seizure".
+- Related: The synonym is associated with the concept but refers to a different concept, a broader class, a narrower class, or a commonly associated entity, e.g., "Myocardial infarction" vs. "Coronary artery disease".
+
+Important ontology rules:
+
+Classify as "Related" if the synonym is:
+- a chemical formula (e.g., H2N-CH2-COOH)
+- a chemical systematic name
+- a chemical identifier or registry name
+- a molecular abbreviation (e.g., Gly, ALA, 5-HT)
+- a gene or protein symbol
+- a short acronym or abbreviation
+- a plural or grammatical variant (e.g., ion vs ions)
+- a Latin anatomical name (e.g., nodus lymphaticus)
+- a broader or more generic term
+- a narrower subtype
+- a commonly associated condition
+- a cause or consequence of the phenotype
+
+Classify as "Exact" if the synonym:
+- describes the same phenotype using different wording
+- is a clinical paraphrase with identical meaning
+- is a reordered phrase with the same meaning
+- replaces words with equivalent medical terms (e.g., hypoplasia vs underdevelopment)
+- describes the same anatomical abnormality
+
+Information regarding the HPO concept:
+
+Concept label: {quote(label)}
+Definition: {quote(definition)}
+Parent concept labels: {applyFormat(parents)}
+Child concept labels: {applyFormat(children)}
+Comment (may be empty): {quote(comment)}
+
+Information regarding the synonym to classify:
+
+Synonym to classify: {quote(synonym)}
+
+Important: 
+
+Please answer only with a valid JSON object containing:\n\n""" \
+"{\n" \
+f"{quote(synonymClass)}: \"Exact\" | \"Related\",\n" \
+f"{quote(confidenceColumn)}: <number between 0 and 10>\n" \
+"}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def createExampleString(examples : list, exStr : str = "Example") -> str:
     ret = "None"
     if len(examples) > 0:
