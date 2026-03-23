@@ -39,7 +39,7 @@ with newProgress() as progress:
     for hpoID in hpoIDs:
         children[hpoID] = getChildLabels(gold, hpoID)
         parents[hpoID]  = getParentLabels(gold, hpoID)
-        progress.update(task, advance=1)
+        progress.update(task, advance = 1)
     
     progress.refresh()
 
@@ -52,27 +52,70 @@ synonyms = synonyms[synonyms[hpoidColumn].isin(hpoIDs)].copy().reset_index(drop 
 
 with newProgress() as progress:
 
-    task = newTask(progress, len(synonyms.index), "Set up Prompt(s)")
+    task = newTask(progress, len(synonyms.index), "Set up first Prompt(s)")
 
     for index, row in synonyms.iterrows():
         hpoID = row[hpoidColumn]
 
-        messages.append(getSynonymClassPrompt(
-            "".join(getElements(gold, hpoID, labelClass)),
-            "".join(getElements(gold, hpoID, definitionClass)),
-            "".join(getElements(gold, hpoID, commentClass)),
-            parents[hpoID],
-            children[hpoID],
-            row[contentColumn]
-        ))
+        if chainOfThoughts:
+            messages.append(semanticClassificationPrompt1(
+                "".join(getElements(gold, hpoID, labelClass)),
+                "".join(getElements(gold, hpoID, definitionClass)),
+                "".join(getElements(gold, hpoID, commentClass)),
+                parents[hpoID],
+                children[hpoID]
+            ))
+        else:
+            messages.append(semanticClassificationPrompt(
+                "".join(getElements(gold, hpoID, labelClass)),
+                "".join(getElements(gold, hpoID, definitionClass)),
+                "".join(getElements(gold, hpoID, commentClass)),
+                parents[hpoID],
+                children[hpoID],
+                row[contentColumn]
+            ))
 
-        progress.update(task, advance=1)
+        progress.update(task, advance = 1)
 
     progress.refresh()
 
 addedPrompts = model.addPrompt(userRole, messages)
 log(f"{addedPrompts} prompts added. Start generating responses...")
 model.generate()
+
+
+if chainOfThoughts:
+    messages = []
+    with newProgress() as progress:
+
+        task = newTask(progress, len(synonyms.index), "Set up second Prompt(s)")
+
+        for index, row in synonyms.iterrows():
+            hpoID = row[hpoidColumn]
+
+            messages.append(semanticClassificationPrompt2(row[contentColumn]))
+            progress.update(task, advance = 1)
+
+        progress.refresh()
+
+    addedPrompts = model.addPrompt(userRole, messages)
+    log(f"{addedPrompts} prompts added. Start generating responses...")
+    model.generate()
+
+
+
+    addedPrompts = model.addPrompt(userRole, [semanticClassificationPrompt3()])
+    log(f"{addedPrompts} prompts added. Start generating responses...")
+    model.generate()
+
+
+
+    addedPrompts = model.addPrompt(userRole, [semanticClassificationPrompt4(fewShot)])
+    log(f"{addedPrompts} prompts added. Start generating responses...")
+    model.generate()
+
+
+
 model.logPrompts()
 
 histories = model.getMessageHistories().copy()

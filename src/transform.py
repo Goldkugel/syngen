@@ -115,7 +115,7 @@ with newProgress() as progress:
     for index, row in data.iterrows():
         
         if row[classColumn] in c:
-            data.loc[index, contentColumn] = str(data[contentColumn][index]).lower()
+            data.loc[index, "tmp"] = str(data[contentColumn][index]).lower()
         progress.update(task, advance = 1)
     
     progress.refresh()
@@ -125,7 +125,7 @@ log("Terms were converted to lower case.")
 
 rowCount = len(data.index)
 log("Removing synonyms having a match with labels...")
-data["tmp"] = data[hpoidColumn].astype(str) + data[contentColumn].astype(str)
+data["tmp"] = data[hpoidColumn].astype(str) + data["tmp"].astype(str)
 labeldata = data.loc[data[classColumn] == labelClass, "tmp"].tolist()
 data = data[
     (~data[classColumn].isin(synonymClasses)) |

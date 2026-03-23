@@ -11,7 +11,8 @@ MODELS=(
   "google/medgemma-27b-text-it"
 )
 
-[ -f "../data/output/transform/transform.csv" ] || python3 "transform.py"
+./prepare.sh
+./embed.sh
 
 for MODEL in "${MODELS[@]}"; do
   python3 ./synclass.py "$MODEL" "$GPUS"

@@ -23,11 +23,14 @@ classified    = readCSV(inputFileClassificationFormatted)
 
 
 
+classified[confidenceColumn] = [-1] * len(classified.index)
+
 with newProgress() as progress:
 
     task = newTask(progress, len(classified.index), "Formatting Answers")
     for index in range(0, len(classified.index)):
-        classified.loc[index, answerColumn] = \
+        classified.loc[index, answerColumn], \
+            classified.loc[index, confidenceColumn] = \
             formatAnswerClassification(str(classified[answerColumn][index]))
         progress.advance(task)
 
@@ -60,7 +63,7 @@ for index, row in classified.iterrows():
 
 
 
-
+print(len(classified.index))
 writeCSV(classified, outputFileClassificationFormatted)
 
 minutes         = int((time.time() - start_time) // 60)

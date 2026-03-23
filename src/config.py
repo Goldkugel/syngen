@@ -4,11 +4,17 @@ import sys
 # Prevent Python from generating .pyc files (compiled bytecode files)
 sys.dont_write_bytecode = True
 
-generateTimes = 300
+generateTimes = 100
 
 generateEmbeddings = False
 
 reduceToTestIDs = True
+
+fewShot = True
+chainOfThoughts = False
+
+fewShotStr = "FewShot" if fewShot else "NoFewShot"
+chainOfThoughtsStr = "ChainOfThoughts" if chainOfThoughts else "NoChainOfThoughts"
 
 # =============================================================================
 # Model Configuration
@@ -27,7 +33,19 @@ if len(sys.argv) > 1 and sys.argv[1][0] != "-":
     model_id = sys.argv[1]
     model_name = model_id[model_id.index("/") + 1:]
 
-embedding_model_id = "abhinand/MedEmbed-large-v0.1"
+embedding_model_id = ""
+embedding_model_name = ""
+if len(sys.argv) > 3:
+    embedding_model_id = sys.argv[3]
+    embedding_model_name = embedding_model_id[embedding_model_id.index("/") + 1:]
+else:
+    embedding_model_id = "bigwiz83/sapbert-from-pubmedbert-squad2"
+    embedding_model_name = "sapbert-from-pubmedbert-squad2"
+
+# embedding_model_id = "abhinand/MedEmbed-large-v0.1"
+embeddingThreshold          = 0.778 # 929 correct
+embeddingExactThreshold     = 0.978
+embeddingRelatedThreshold   = 0.392
 
 # gpu_id = "7"
 gpu_id = "5,6"
@@ -39,7 +57,7 @@ if len(sys.argv) > 2:
 # Must be in (0, 1]. Set to 1 to consider all tokens.
 top_p=0.95
 
-max_model_len = 2 * 2048
+max_model_len = 4 * 2048
 max_num_batched_tokens = 2 * max_model_len
 
 # Float that controls the randomness of the sampling. Lower values make the 
@@ -48,7 +66,7 @@ max_num_batched_tokens = 2 * max_model_len
 temperature = 0.01
 
 # Maximum number of tokens to generate per output sequence.
-max_tokens = 1024
+max_tokens = 2048
 
 # Random seed to use for the generation
 seed = 2898231092
@@ -107,14 +125,32 @@ progressBarTextLength = 40
 sourceLanguageShort = "en"
 sourceLanguage      = "English"
 
-hpoidColumn      = "hpoID"
-classColumn      = "class"
-typeColumn       = "type"
-contentColumn    = "content"
-systemColumn     = "system"
-roundColumn      = "round"
-answerColumn     = "answer"
-similarityColumn = "similarity"
+cosineSimilarity = "cosine"
+euclideanSimilarity = "euclidean"
+scalarSimilarity = "scalar"
+manhattanSimilarity = "manhattan"
+angularSimilarity = "angular"
+mahalanobisSimilarity = "mahalanobis"
+
+similarityMetrics = [
+    cosineSimilarity,
+    euclideanSimilarity,
+    scalarSimilarity,
+    manhattanSimilarity,
+    angularSimilarity,
+    mahalanobisSimilarity
+]
+
+hpoidColumn             = "hpoID"
+classColumn             = "class"
+typeColumn              = "type"
+contentColumn           = "content"
+systemColumn            = "system"
+roundColumn             = "round"
+answerColumn            = "answer"
+confidenceColumn        = "confidence"
+similarityColumnPrefix  = f"similarity_{model_name}_"
+embeddingColumn         = "embedding"
 
 # =============================================================================
 # Data Classes of Concepts in HPO that are being processed
@@ -125,6 +161,7 @@ definitionClass                 = "definition"
 commentClass                    = "comment"
 referenceClass                  = "reference"
 
+synonymClass                    = "classification"
 exactSynonymClass               = "exact"
 relatedSynonymClass             = "related"
 broadSynonymClass               = "broad"
@@ -197,10 +234,10 @@ outputFolderNameGold                = "gold"
 # Fifth step.
 outputFolderNameEvaluation          = "evaluate"
 
-logFileName                         = f"syngen_{model_name}.{logFileFormat}"
+logFileName                         = f"syngen_{chainOfThoughtsStr}_{fewShotStr}_{model_name}.{logFileFormat}"
 if model_name == "":
     logFileName                     = f"syngen.{logFileFormat}"
-logFilePromptsName                  = f"prompts_{model_name}.{logFileFormat}"
+logFilePromptsName                  = f"prompts_{chainOfThoughtsStr}_{fewShotStr}_{model_name}.{logFileFormat}"
 
 logFile                     = os.path.join(
     dataDir,
@@ -246,6 +283,8 @@ outputFileTransformed                        = os.path.join(
     outputFileNameTransformed
 )
 
+inputFileTask = outputFileTransformed if reduceToTestIDs else outputFileTransformedFull
+
 # =============================================================================
 # Files for Synonym Generation
 # =============================================================================
@@ -257,7 +296,7 @@ outputFolderNameGeneration                                  = "generation"
 # Contains the plain Outputed Generated Synonyms of the Model. Since more
 # models can be used for Generation, the files need to contain the model name.
 # The generation times plays a role as well.
-inputFileGeneration                                         = outputFileTransformed if reduceToTestIDs else outputFileTransformedFull
+inputFileGeneration                                         = inputFileTask
 
 outputFileNameGeneration                                    = f"{outputFolderNameGeneration}_{generateTimes}_{model_name}.{csvFileFormat}"
 outputFileGeneration                                        = os.path.join(
@@ -404,9 +443,9 @@ outputFolderNameClassification                  = "classification"
 
 
 
-inputFileClassification                         = outputFileTransformed if reduceToTestIDs else outputFileTransformedFull
+inputFileClassification                         = inputFileTask
 
-outputFileNameClassification                    = f"{outputFolderNameClassification}_{model_name}.{csvFileFormat}"
+outputFileNameClassification                    = f"{outputFolderNameClassification}_{chainOfThoughtsStr}_{fewShotStr}_{model_name}.{csvFileFormat}"
 outputFileClassification                        = os.path.join(
     dataDir,
     outputFolderName,
@@ -416,7 +455,7 @@ outputFileClassification                        = os.path.join(
 
 # Contains the formatted Generated Synonyms of the Model. 
 inputFileClassificationFormatted                = outputFileClassification
-outputFileNameClassificationFormattedPrefix     = f"{outputFolderNameClassification}_formatted"
+outputFileNameClassificationFormattedPrefix     = f"{outputFolderNameClassification}_{chainOfThoughtsStr}_{fewShotStr}_formatted"
 outputFileNameClassificationFormatted           = f"{outputFileNameClassificationFormattedPrefix}_{model_name}.{csvFileFormat}"
 outputFileClassificationFormatted               = os.path.join(
     dataDir,
@@ -534,8 +573,9 @@ outputFolderNameClassificationType                  = "type"
 
 
 
-inputFileClassificationType                         = outputFileTransformed if reduceToTestIDs else outputFileTransformedFull
-outputFileNameClassificationType                    = f"{outputFolderNameClassificationType}_{model_name}.{csvFileFormat}"
+inputFileClassificationType                         = inputFileTask
+
+outputFileNameClassificationType                    = f"{outputFolderNameClassificationType}_{chainOfThoughtsStr}_{fewShotStr}_{model_name}.{csvFileFormat}"
 outputFileClassificationType                            = os.path.join(
     dataDir,
     outputFolderName,
@@ -545,7 +585,7 @@ outputFileClassificationType                            = os.path.join(
 
 inputFileClassificationTypeFormatted                = outputFileClassificationType
 
-outputFileNameClassificationTypeFormattedPrefix     = f"{outputFolderNameClassificationType}_formatted"
+outputFileNameClassificationTypeFormattedPrefix     = f"{outputFolderNameClassificationType}_{chainOfThoughtsStr}_{fewShotStr}_formatted"
 outputFileNameClassificationTypeFormatted           = f"{outputFileNameClassificationTypeFormattedPrefix}_{model_name}.{csvFileFormat}"
 outputFileClassificationTypeFormatted               = os.path.join(
     dataDir,

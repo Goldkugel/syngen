@@ -1,5 +1,6 @@
 import pandas       as pd
 import Levenshtein  as lev
+import numpy as np
 import sys
 import os
 import json
@@ -287,18 +288,19 @@ def log(
     """
     Log a timestamped message to file and optionally to stdout.
     """
-    myfile = open(file=str(file), mode="a")
+    if string is not None:
+        myfile = open(file=str(file), mode="a")
 
-    # Prefix log message with timestamp
-    string = (
-        "[" + dt.now().strftime("%Y-%m-%d %H:%M:%S") + "] "
-        + string
-    )
+        # Prefix log message with timestamp
+        string = (
+            "[" + dt.now().strftime("%Y-%m-%d %H:%M:%S") + "] "
+            + string
+        )
 
-    if cmdline:
-        print(string)
+        if cmdline:
+            print(string)
 
-    myfile.write(string + "\n")
+        myfile.write(string + "\n")
 
 
 def writePickle(data: pd.DataFrame, file: str = "") -> None:
@@ -946,35 +948,30 @@ def formatAnswerGeneration(txt : str, label : str) -> list:
     return ret
         
 
-def formatAnswerClassification(txt : str) -> str:
+def formatAnswerClassification(txt : str) -> tuple[str, int]:
     ret = undefinedSynonymType
+    confidence = -1
 
-    if txt is not None:
-        ret = txt.lower()
-        if unusedTokens in ret:
-            ret = ret[ret.index(unusedTokens) + len(unusedTokens):]
+    if txt is not None and "{" in txt and "}" in txt:
+        start   = txt.rfind("{")
+        end     = txt.rfind("}")
+        if start < end:
+            try:
+                plain = txt[start:end+1]
+                while "\"\"" in plain:
+                    plain = plain.replace("\"\"", "\"")
+                jsonAnswer = json.loads(plain)
+                if isinstance(jsonAnswer, dict):
+                    j = dict(jsonAnswer)
+                    if synonymClass in j.keys() and confidenceColumn in j.keys():
+                        a = str(j[synonymClass]).lower()
+                        if a in synonymClasses:
+                            confidence = int(j[confidenceColumn])
+                            ret = a
+            except:
+                confidence = -1
 
-        if exactSynonymClass in ret and broadSynonymClass not in ret and \
-            narrowSynonymClass not in ret and relatedSynonymClass not in ret:
-            ret = exactSynonymClass
-        else:
-            if exactSynonymClass not in ret and broadSynonymClass in ret and \
-                narrowSynonymClass not in ret and relatedSynonymClass not \
-                    in ret:
-                ret = broadSynonymClass
-            else:
-                if exactSynonymClass not in ret and broadSynonymClass not \
-                    in ret and narrowSynonymClass in ret and \
-                        relatedSynonymClass not in ret:
-                    ret = narrowSynonymClass
-                else:
-                    if exactSynonymClass not in ret and broadSynonymClass not \
-                        in ret and narrowSynonymClass not \
-                            in ret and relatedSynonymClass in ret:
-                        ret = relatedSynonymClass
-                    else:
-                        ret = undefinedSynonymType
-    return ret
+    return ret, confidence
 
 def formatAnswerClassificationType(txt : str) -> str:
     ret = undefinedSynonymType
@@ -1042,3 +1039,61 @@ def getMetrics(
 
     return ret
     
+def cosSim(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+
+def eucDis(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.linalg.norm(a - b)
+
+
+def eucSim(a, b):
+    # Convert distance → similarity (higher = more similar)
+    return 1 / (1 + eucDis(a, b))
+
+
+def scaSim(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.dot(a, b)
+
+
+def manDis(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.sum(np.abs(a - b))
+
+
+def manSim(a, b):
+    # Convert distance → similarity
+    return 1 / (1 + manDis(a, b))
+
+
+def angSim(a, b):
+    # Angular similarity = 1 - (angle / π)
+    cos_sim = cosSim(a, b)
+    angle = np.arccos(np.clip(cos_sim, -1.0, 1.0))
+    return 1 - (angle / np.pi)
+
+
+def mahDis(a, b, cov = None):
+    a = np.array(a)
+    b = np.array(b)
+    
+    diff = a - b
+    
+    if cov is None:
+        # If no covariance matrix provided, assume identity
+        cov = np.eye(len(a))
+    
+    inv_cov = np.linalg.inv(cov)
+    return np.sqrt(np.dot(np.dot(diff.T, inv_cov), diff))
+
+
+def mahSim(a, b, cov=None):
+    # Convert distance → similarity
+    return 1 / (1 + mahDis(a, b, cov))

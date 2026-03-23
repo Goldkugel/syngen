@@ -9,7 +9,7 @@ MODELS=(
   "google/medgemma-27b-text-it"
 )
 
-python3 "transform.py"
+./prepare.sh
 
 for MODEL in "${MODELS[@]}"; do
   python3 ./syngen.py "$MODEL" "$GPUS"

@@ -42,8 +42,6 @@ classified_complete[answerColumn]   = classified_complete[answerColumn].str.lowe
 classified_complete[typeColumn]     = classified_complete[typeColumn  ].str.lower()
 
 classified_complete[typeColumn]     = classified_complete[typeColumn].replace(np.nan, expertSynonymType)
-classificationClasses               = [expertSynonymType, laypersonSynonymType]
-classified_complete                 = classified_complete[(classified_complete[typeColumn].isin(classificationClasses)) & (classified_complete[systemColumn] != "")].copy().reset_index(drop = True)
 
 
 
@@ -94,13 +92,10 @@ classified_complete = classified_complete[classified_complete[classColumn].isin(
 
 
 
-classified = classified_complete[classColumn].isin([exactSynonymClass, relatedSynonymClass]).copy().reset_index(drop = True)
 
 # Count occurrences per system and classification
-# Count occurrences per system and classification
-classified = classified_complete[classColumn].isin([exactSynonymClass, relatedSynonymClass]).copy().reset_index(drop = True)
+classified = classified_complete
 counts = classified_complete.groupby([answerColumn, systemColumn]).size().unstack(fill_value = 0)
-
 # Create plot
 ax = counts.plot(kind = "bar", figsize = (3 * len(systems), 4), width = 0.8)
 

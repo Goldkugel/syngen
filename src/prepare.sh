@@ -1,0 +1,1 @@
+[ -f "../data/output/transform/transform.csv" ] || (python3 "transform.py" && python3 "embed.py")

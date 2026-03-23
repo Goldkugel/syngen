@@ -9,7 +9,8 @@ MODELS=(
   "google/medgemma-4b-it"
 )
 
-[ -f "../data/output/transform/transform.csv" ] || python3 "transform.py"
+./prepare.sh
+./embed.sh
 
 for MODEL in "${MODELS[@]}"; do
   python3 ./syntype.py "$MODEL" "$GPUS"
