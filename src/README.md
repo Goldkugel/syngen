@@ -1,0 +1,20 @@
+# Source
+
+The scripts of syngen, run from the repository root (see the [README](../README.md)).
+
+| File | Content |
+|---|---|
+| `SynGenLLM.py` | Without arguments the preparation run (`prepare()` in `SynGenUtils.py`): transforms `hp.owl` with the `adapter` package into `hpo.csv`, draws the development set, the evaluation set and the few-shot examples, each only if needed. With an experiment index: the LLM stage. Every concept is prompted `syngen.llm.rounds` times, round r with seed `llm.seed + r - 1` and its own answer store; the synonyms are counted per concept (case and white space ignored) with the number of rounds that generated them |
+| `SynGenPubMed.py` | The PubMed stage: searches the label and every LLM synonym (as a phrase in title and abstract, published up to `syngen.pubmed.max_date`) with the E-utilities, fetches the articles, tags the sentences mentioning the searched term with a NER model, and keeps per concept the plausible entities most similar to the label. Searches, articles and spans are cached in SQLite; `--fetch` only fills the cache |
+| `SynGenConceptNet.py` | The ConceptNet stage: finds the spans of the label and the synonyms that are ConceptNet concepts, their neighbours along the configured relations, lets the LLM keep those that can replace the span in the concept (optional), builds terms with up to `max_substitutions` replacements and keeps per concept the most similar to the label |
+| `SynGenConceptNetDB.py` | Builds the SQLite database of the ConceptNet stage from the assertions dump, with only the configured relations and languages |
+| `SynGenEmbed.py` | Normalises (`normalizer`) and embeds (`embedder`, SapBERT) the generated synonyms of all stages and the gold synonyms, and computes the similarities the evaluation needs |
+| `SynGenEval.py` | Evaluates each stage alone and cumulatively with the lexical, normalised and embedding match: precision, recall, F1 (micro with bootstrap intervals, macro), accuracy, words covered, synonyms HPO lists with other classes or for other concepts, threshold and rounds curves |
+| `SynGenDevelopmentSet.py` | Draws the development set, the evaluation set and the few-shot examples again (`writeDevelopmentSet()` in `SynGenUtils.py`) |
+| `SynGenUtils.py` | Helpers shared by the scripts: reading and writing CSV files, the transformed HPO (`readTransformed()`), the gold standard (`goldStandard()`) and the other synonyms (`otherSynonyms()`), the information of the concepts for the prompts (`conceptInformation()`), the keys of the matches (`lexicalKey()`, `normalizedKeys()`), embedding (`embed()`, `similarities()`), the ranking of candidates (`rankCandidates()`), parsing the answers (`parseTerms()`), the check whether an output is up to date (`outdated()`, `writeSettings()`), the preparation and the concepts of a run (`taskConcepts()`) |
+| `SynGenConfig.py` | Pydantic schema of the `syngen` section of `config/config.yaml` and of its experiments |
+| `config.py` | Reads the configuration, picks the experiment and the models from the command line, defines the column names and the file names of every step. `python3 ./src/config.py` prints the number of experiments |
+
+The scripts import `config.py` and `SynGenUtils.py` with `from ... import *`. The packages of a step (`adapter`, `embedder`, `model`, `normalizer`, `transformers`) are imported where they are needed, so that a step loads only what it uses.
+
+Each script starts with the logger: the first line of its log file is its command line, and every step is logged with its start, end and duration (`Logger.step()`).

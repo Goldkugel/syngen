@@ -1,887 +1,243 @@
+"""
+The configuration of syngen: reads config/config.yaml, picks the experiment
+and the models of a run from the command line, and defines the column names
+and the file names of every step. Imported by every script with
+`from config import *`.
+
+    python3 ./src/config.py   prints the number of experiments
+"""
+
 import os
 import sys
+import yaml
 
-# Prevent Python from generating .pyc files (compiled bytecode files)
+from SynGenConfig import ExperimentConfig, SyngenConfig
+from SynGenConfig import stages, llmStage, pubmedStage, conceptnetStage
+
 sys.dont_write_bytecode = True
 
-generateTimes = 100
+# =============================================================================
+# Configuration File
+# =============================================================================
 
-generateEmbeddings = False
+# The settings of syngen ("syngen" section) and of the packages it uses
+# (adapter, embedder, llm, logger, normalizer).
+configFile = "./config/config.yaml"
 
-reduceToTestIDs = True
+with open(configFile, "r", encoding = "utf-8") as f:
+    configurationFile = yaml.safe_load(f)
 
-fewShot = True
-chainOfThoughts = False
+syngenConfig = SyngenConfig.model_validate(configurationFile["syngen"])
 
-fewShotStr = "FewShot" if fewShot else "NoFewShot"
-chainOfThoughtsStr = "ChainOfThoughts" if chainOfThoughts else "NoChainOfThoughts"
+# =============================================================================
+# Experiment and models of a run, given on the command line:
+#   (nothing)           the preparation run (SynGenLLM.py only);
+#   <index>             the experiment syngen.experiments[<index>], from 0,
+#                       with every model of llm.model_id;
+#   <index> <model ID>  only this model.
+# Options (e.g. --fetch) are left to the scripts.
+# =============================================================================
+
+arguments = [argument for argument in sys.argv[1:] if not argument.startswith("--")]
+options   = [argument for argument in sys.argv[1:] if argument.startswith("--")]
+
+experimentIndex = None
+if len(arguments) > 0:
+    experimentCount = len(syngenConfig.experiments)
+    if not arguments[0].isdigit() or int(arguments[0]) >= experimentCount:
+        sys.exit(f"The experiment '{arguments[0]}' does not exist: give its index in " \
+            f"syngen.experiments, 0 to {experimentCount - 1}.")
+    experimentIndex = int(arguments[0])
+
+# The preparation run generates nothing, so it has no experiment.
+experiment = (ExperimentConfig() if experimentIndex is None
+    else syngenConfig.experiments[experimentIndex])
+
+reduceToTestIDs         = experiment.test
+fewShot                 = experiment.few_shot
+addDefinition           = experiment.definition
+addComment              = experiment.comment
+addStructure            = experiment.structure
+experimentStages        = experiment.stages
+
+rounds                  = syngenConfig.llm.rounds
+
+testStr                 = "Test" if reduceToTestIDs else "NoTest"
+configStr               = "Def" if addDefinition else "NoDef"
+configStr              += "_Com" if addComment else "_NoCom"
+configStr              += "_Str" if addStructure else "_NoStr"
+fewShotStr              = "FS" if fewShot else "NoFS"
+roundsStr               = f"R{rounds}"
+
+# Everything the LLM's synonyms depend on, e.g. Test_Def_Com_Str_FS_R5.
+generationStr           = f"{testStr}_{configStr}_{fewShotStr}_{roundsStr}"
+
+def stagesStr(stage : str) -> str:
+    """
+    The stages of the experiment up to and including `stage`, by their
+    first letters, e.g. "LP" for the LLM and PubMed: the file of a stage
+    holds the synonyms of all of them.
+    """
+    upTo = experimentStages[:experimentStages.index(stage) + 1]
+    return "".join(s[0].upper() for s in upTo)
+
+def previousStage(stage : str) -> str | None:
+    """The stage of the experiment before `stage`, None for the first."""
+    index = experimentStages.index(stage)
+    return experimentStages[index - 1] if index > 0 else None
 
 # =============================================================================
 # Model Configuration
 # =============================================================================
 
-# Target Large Models:
-#model_id = "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
-#model_id = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
-#model_id = "google/medgemma-27b-text-it"
-#model_id = "meta-llama/Llama-3.3-70B-Instruct"
+# None in the preparation run (empty), the one given after the experiment, or
+# all of llm.model_id.
+modelIDs = []
+if experimentIndex is not None:
+    modelIDs = arguments[1:2] or list(configurationFile["llm"]["model_id"])
 
-model_id = ""
-model_name = ""
-# model_id = "google/medgemma-4b-it"
-if len(sys.argv) > 1 and sys.argv[1][0] != "-":
-    model_id = sys.argv[1]
-    model_name = model_id[model_id.index("/") + 1:]
+def modelNameOf(modelID : str) -> str:
+    """
+    The name of a model in file names and the model column: its ID without
+    the organisation, e.g. "Qwen2.5-72B-Instruct-GPTQ-Int4".
+    """
+    return modelID[modelID.index("/") + 1:] if "/" in modelID else modelID
 
-embedding_model_id = ""
-embedding_model_name = ""
-if len(sys.argv) > 3:
-    embedding_model_id = sys.argv[3]
-    embedding_model_name = embedding_model_id[embedding_model_id.index("/") + 1:]
-else:
-    embedding_model_id = "bigwiz83/sapbert-from-pubmedbert-squad2"
-    embedding_model_name = "sapbert-from-pubmedbert-squad2"
-
-# embedding_model_id = "abhinand/MedEmbed-large-v0.1"
-embeddingThreshold          = 0.778 # 929 correct
-embeddingExactThreshold     = 0.978
-embeddingRelatedThreshold   = 0.392
-
-# gpu_id = "7"
-gpu_id = "5,6"
-# gpu_id = "0,1,2,3"
-if len(sys.argv) > 2:
-    gpu_id = sys.argv[2]
-
-# Float that controls the cumulative probability of the top tokens to consider.
-# Must be in (0, 1]. Set to 1 to consider all tokens.
-top_p=0.95
-
-max_model_len = 4 * 2048
-max_num_batched_tokens = 2 * max_model_len
-
-# Float that controls the randomness of the sampling. Lower values make the 
-# model more deterministic, while higher values make the model more random. 
-# Zero means greedy sampling.
-temperature = 0.01
-
-# Maximum number of tokens to generate per output sequence.
-max_tokens = 2048
-
-# Random seed to use for the generation
-seed = 2898231092
+# The embedding model of the similarities: the first of embedder.model_id,
+# named by syngen.embedding_model_names or its ID without the organisation.
+embeddingModelID   = configurationFile["embedder"]["model_id"][0]
+embeddingModelName = syngenConfig.embedding_model_names.get(embeddingModelID,
+    modelNameOf(embeddingModelID))
 
 # =============================================================================
-# For Simplification
+# Formatting of the prompts and the log
 # =============================================================================
 
 quotationCharacter = "\""
 
-systemRole = "system"
-userRole = "user"
-modelRole = "assistant"
-
-# For Gemma
-startTurnID = "start_of_turn"
-endTurnID = "end_of_turn"
-
-# For Llama
-startHeaderID = "start_header_id"
-endHeaderID = "end_header_id"
-endOfTextID = "eot_id"
-beginOfTextID = "begin_of_text"
-endOfTextID2 = "end_of_text"
-
-startTag = "<"
-endTag = ">"
-bar = "|"
-
-unusedTokens = "<unused95>"
-
-# For Gemma
-startTurn = f"{startTag}{startTurnID}{endTag}"
-endTurn = f"{startTag}{endTurnID}{endTag}"
-
-# For Llama
-startHeader = f"{startTag}{bar}{startHeaderID}{bar}{endTag}"
-endHeader = f"{startTag}{bar}{endHeaderID}{bar}{endTag}"
-endOfText = f"{startTag}{bar}{endOfTextID}{bar}{endTag}"
-beginOfText = f"{startTag}{bar}{beginOfTextID}{bar}{endTag}"
-endOfText2 = f"{startTag}{bar}{endOfTextID2}{bar}{endTag}"
-
-messageRoleElement = "role"
-messageTextElement = "message"
-
-headerChar = "="
-headerLen = 60
-headerSeparator = headerChar * headerLen
-
-progressBarColor = "cyan"
-progressBarTextLength = 40
-
 # =============================================================================
-# For Data Curation
-# =============================================================================
-sourceLanguageShort = "en"
-sourceLanguage      = "English"
-
-cosineSimilarity = "cosine"
-euclideanSimilarity = "euclidean"
-scalarSimilarity = "scalar"
-manhattanSimilarity = "manhattan"
-angularSimilarity = "angular"
-mahalanobisSimilarity = "mahalanobis"
-
-similarityMetrics = [
-    cosineSimilarity,
-    euclideanSimilarity,
-    scalarSimilarity,
-    manhattanSimilarity,
-    angularSimilarity,
-    mahalanobisSimilarity
-]
-
-hpoidColumn             = "hpoID"
-classColumn             = "class"
-typeColumn              = "type"
-contentColumn           = "content"
-systemColumn            = "system"
-roundColumn             = "round"
-answerColumn            = "answer"
-confidenceColumn        = "confidence"
-similarityColumnPrefix  = f"similarity_{model_name}_"
-embeddingColumn         = "embedding"
-
-# =============================================================================
-# Data Classes of Concepts in HPO that are being processed
+# Columns of the synonym files, after the concept ID (the transformed HPO's
+# id column, see SynGenUtils.py)
 # =============================================================================
 
-labelClass                      = "label"
-definitionClass                 = "definition"
-commentClass                    = "comment"
-referenceClass                  = "reference"
+# The generated synonym, and the stage (llm, pubmed, conceptnet) and model
+# it comes from.
+synonymColumn               = "synonym"
+sourceColumn                = "source"
+modelColumn                 = "model"
+# LLM: in how many rounds the synonym was generated, and in which first.
+roundsColumn                = "rounds"
+firstRoundColumn            = "first_round"
+# PubMed and ConceptNet: the term the synonym was found from, where (PMIDs or
+# the ConceptNet replacements), how often, and its similarity to the label.
+seedColumn                  = "seed"
+evidenceColumn              = "evidence"
+frequencyColumn             = "frequency"
+similarityColumn            = f"similarity_{embeddingModelName}"
+# Whether the synonym equals the label of its concept (normalised); such
+# synonyms are reported as "as_label" and not scored.
+asLabelColumn               = "as_label"
+# SynGenEmbed.py: the normalised synonym (its sorted tokens) and a key equal
+# for synonyms with the same embedding.
+normalizedColumn            = "normalized"
+embeddingKeyColumn          = "embedding_key"
+# The highest similarity of a generated synonym to a gold synonym of its
+# concept, and of a gold synonym to the synonyms of each stage.
+goldSimilarityColumn        = "gold_similarity"
+def stageSimilarityColumn(stage : str) -> str:
+    """The highest similarity of a gold synonym to the synonyms of a stage."""
+    return f"similarity_{stage}"
 
-synonymClass                    = "classification"
-exactSynonymClass               = "exact"
-relatedSynonymClass             = "related"
-broadSynonymClass               = "broad"
-narrowSynonymClass              = "narrow"
-
-synonymClasses = [exactSynonymClass, relatedSynonymClass]#, broadSynonymClass, narrowSynonymClass]
-
-expertSynonymType               = "expert"
-laypersonSynonymType            = "layperson"
-abbreviationSynonymType         = "abbreviation"
-obsoleteSynonymType             = "obsolete"
-pluralFormSynonymType           = "plural"
-ukSpellingSynonymType           = "uk"
-allelicRequirementSynonymType   = "allelic"
-# In OWL Class Section, rather than in Axiom Section.
-directSynonymType               = "direct"
-undefinedSynonymType            = "undefined"
-
-childrenClass                   = "child"
-
-enrichedSourceExactSynonymClass = "generatedSynonym"
-enrichedSourceDefinitionClass   = "generatedDefinition"
-
-goldStandardSystem              = "gold"
-
-owlSourceExactSynonym                   = "hasExactSynonym"
-owlSourceRelatedSynonym                 = "hasRelatedSynonym"
-owlSourceBoradSynonym                   = "hasBroadSynonym"
-owlSourceNarrowSynonym                  = "hasNarrowSynonym"
-
-owlSourceSynonymTypeLayperson           = "layperson"
-owlSourceSynonymTypeAbbreviation        = "abbreviation"
-owlSourceSynonymTypeObsolete            = "obsolete_synonym"
-owlSourceSynonymTypePlural              = "plural_form"
-owlSourceSynonymTypeUKSpelling          = "uk_spelling"
-owlSourceSynonymTypeAllelic             = "allelic_requirement"
-
-precisionLabel  = "precision"
-recallLabel     = "recall"
-accuracyLabel   = "accuracy"
-f1ScoreLabel    = "f1"
+# The answer keys of the prompts (see prompts/).
+synonymsKey                 = "synonyms"
+keepKey                     = "keep"
 
 # =============================================================================
 # Folder structure
 # =============================================================================
 
-csvFileFormat = "csv"
-pickleFileFormat = "pkl"
-logFileFormat = "log"
+csvFileFormat  = "csv"
+jsonFileFormat = "json"
 plotFileFormat = "png"
 
-# Basic Data Directory.
-dataDir = "../data"
+dataDir = syngenConfig.data_folder
 
-# Basic Data Subdirectories.
-inputFolderName                     = "input"
-outputFolderName                    = "output"
-logFolderName                       = "logs"
+outputFolderName = "output"
 
-# Basic Data Processing Directories.
-# First step.
-outputFolderNameTransformed         = "transform"
-# The second Step is the actual job e.g. generation or classification.
-# Third step.
-outputFolderNameFormatted           = "format"
-# Fourth step.
-outputFolderNameMerged              = "merge"
-# The gold standards are saved here, might not be necessary.
-outputFolderNameGold                = "gold"
-# Fifth step.
-outputFolderNameEvaluation          = "evaluate"
+def outputPath(folder : str, name : str) -> str:
+    """A file in data/output/<folder>/."""
+    return os.path.join(dataDir, outputFolderName, folder, name)
 
-logFileName                         = f"syngen_{chainOfThoughtsStr}_{fewShotStr}_{model_name}.{logFileFormat}"
-if model_name == "":
-    logFileName                     = f"syngen.{logFileFormat}"
-logFilePromptsName                  = f"prompts_{chainOfThoughtsStr}_{fewShotStr}_{model_name}.{logFileFormat}"
-
-logFile                     = os.path.join(
-    dataDir,
-    logFolderName,
-    logFileName
-)
-
-logFilePrompts              = os.path.join(
-    dataDir,
-    logFolderName,
-    logFilePromptsName
-)
-
-# The Input Folders of each Step
-inputFolderNameTransformed          = inputFolderName
-
-inputFileNameTransformed            = "hp.owl"
-
+# The HPO file read by the adapter (adapter.hpo section).
 inputFileTransformed        = os.path.join(
-    dataDir,
-    inputFolderName,
-    inputFileNameTransformed
+    configurationFile["adapter"]["hpo"]["input_folder"],
+    configurationFile["adapter"]["hpo"]["input_files"][0]
 )
 
-# Contains all Information of the hp.owl needed to Generate and Classify 
-# Synonyms and perform the Evaluation.
-outputFileNameTransformedFull       = f"transform.{csvFileFormat}"
-
-outputFileTransformedFull                     = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameTransformed,
-    outputFileNameTransformedFull
+# hp.owl transformed by the preparation run, where adapter.hpo.output_folder
+# and output_file say. The development set, the evaluation set and the
+# few-shot examples are named after it in the same folder.
+outputFileTransformedFull = os.path.join(
+    configurationFile["adapter"]["hpo"]["output_folder"],
+    configurationFile["adapter"]["hpo"]["output_file"]
 )
+transformedStem, transformedExtension = os.path.splitext(outputFileTransformedFull)
 
-# Reduction to Test HPO IDs listed at the bottom for engineering purposes.
-outputFileNameTransformed           = f"transform.reduced.{csvFileFormat}"
+# The development set (syngen.development_set): the concepts drawn at random,
+# with their information and the labels of their parents and children.
+outputFileTransformedDevelopment = f"{transformedStem}.development{transformedExtension}"
 
-outputFileTransformed                        = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameTransformed,
-    outputFileNameTransformed
-)
+# The evaluation set: hpo.csv without the synonyms of the development
+# concepts, whose labels may still be needed as parents or children.
+outputFileTransformedEvaluation  = f"{transformedStem}.evaluation{transformedExtension}"
 
-inputFileTask = outputFileTransformed if reduceToTestIDs else outputFileTransformedFull
+# The few-shot examples, drawn from the development set.
+outputFileFewShot                = f"{transformedStem}.fewshot.{jsonFileFormat}"
+
+inputFileTask = outputFileTransformedDevelopment if reduceToTestIDs else outputFileTransformedEvaluation
 
 # =============================================================================
-# Files for Synonym Generation
+# Files of the stages: the synonyms of a stage and of the stages before it,
+# one file per model, e.g.
+# data/output/pubmed/pubmed_Test_Def_Com_Str_FS_R5_LP_<model>.csv.
 # =============================================================================
 
-outputFolderNameGeneration                                  = "generation"
+def outputFileStage(stage : str, modelName : str) -> str:
+    """The synonyms of the stages of the experiment up to `stage`."""
+    return outputPath(stage,
+        f"{stage}_{generationStr}_{stagesStr(stage)}_{modelName}.{csvFileFormat}")
+
+def outputFileLLMRaw(modelName : str) -> str:
+    """The prompts and answers of every round of the LLM."""
+    return outputPath(llmStage,
+        f"{llmStage}_{generationStr}_raw_{modelName}.{csvFileFormat}")
+
+# The last stage of the experiment, whose file holds all synonyms.
+finalStage = experimentStages[-1]
+
+# SynGenEmbed.py: the synonyms of all stages with their normalised form and
+# similarities, and the gold synonyms with their best similarity per stage.
+outputFolderNameEmbedded = "embedded"
+
+def outputFileEmbedded(modelName : str) -> str:
+    """The generated synonyms, normalised and embedded."""
+    return outputPath(outputFolderNameEmbedded,
+        f"embed_{generationStr}_{stagesStr(finalStage)}_{modelName}.{csvFileFormat}")
+
+def outputFileEmbeddedGold(modelName : str) -> str:
+    """The gold synonyms of the concepts, normalised and embedded."""
+    return outputPath(outputFolderNameEmbedded,
+        f"embed_{generationStr}_{stagesStr(finalStage)}_{modelName}_gold.{csvFileFormat}")
+
+# SynGenEval.py.
+outputFolderNameEvaluation = "evaluated"
+
+def outputFileEvaluation(modelName : str, name : str, fileFormat : str = plotFileFormat) -> str:
+    """An evaluation output of the experiment, e.g. ..._summary.csv."""
+    return outputPath(outputFolderNameEvaluation,
+        f"eval_{generationStr}_{stagesStr(finalStage)}_{modelName}_{name}.{fileFormat}")
 
 
-
-# Contains the plain Outputed Generated Synonyms of the Model. Since more
-# models can be used for Generation, the files need to contain the model name.
-# The generation times plays a role as well.
-inputFileGeneration                                         = inputFileTask
-
-outputFileNameGeneration                                    = f"{outputFolderNameGeneration}_{generateTimes}_{model_name}.{csvFileFormat}"
-outputFileGeneration                                        = os.path.join(
-    dataDir,        
-    outputFolderName,
-    outputFolderNameGeneration,
-    outputFileNameGeneration
-)
-
-inputFileGenerationFormatted                                = outputFileGeneration
-
-outputFileNameGenerationFormattedPrefix                     = f"{outputFolderNameGeneration}_formatted_terms_{generateTimes}"
-outputFileNameGenerationFormattedEmbeddingsPrefix           = f"{outputFolderNameGeneration}_formatted_embeddings_{generateTimes}"
-
-outputFileNameGenerationFormatted                           = f"{outputFileNameGenerationFormattedPrefix}_{model_name}.{csvFileFormat}"
-outputFileGenerationFormatted                               = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameFormatted,
-    outputFileNameGenerationFormatted
-)
-
-outputFileNameGenerationFormattedEmbeddings                 = f"{outputFileNameGenerationFormattedEmbeddingsPrefix}_{model_name}.{csvFileFormat}"
-outputFileGenerationFormattedEmbeddings                     = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameFormatted,
-    outputFileNameGenerationFormattedEmbeddings
-)
-
-inputFileNameGenerationMerged                               = [
-    file
-    for file in os.listdir(os.path.join(dataDir, outputFolderName, outputFolderNameFormatted))
-    if file.startswith(outputFileNameGenerationFormattedPrefix) and file.endswith(csvFileFormat)
-]
-inputFileGenerationMerged                                   = [
-    os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameGenerationMerged
-]
-
-inputFileNameGenerationMergedEmbeddings                     = [
-    file
-    for file in os.listdir(os.path.join(dataDir, outputFolderName, outputFolderNameFormatted))
-    if file.startswith(outputFileNameGenerationFormattedEmbeddingsPrefix) and file.endswith(csvFileFormat)
-]
-inputFileGenerationMergedEmbeddings                         = [
-    os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameGenerationMergedEmbeddings
-]
-
-# Contains the formatted Generated Synonyms of all Models. 
-outputFileNameGenerationMerged                              = f"{outputFolderNameGeneration}_merged_terms_{generateTimes}.{csvFileFormat}"
-outputFileGenerationMerged                                  = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameMerged,
-    outputFileNameGenerationMerged
-)
-
-# Contains the Embeddings of the formatted Generated Synonyms of all Models.s
-outputFileNameGenerationMergedEmbeddings                    = f"{outputFolderNameGeneration}_merged_embeddings_{generateTimes}.{csvFileFormat}"
-outputFileGenerationMergedEmbeddings                        = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameMerged,
-    outputFileNameGenerationMergedEmbeddings
-)
-
-# The Gold Standard output. No influence from models.
-outputFileNameGenerationGold                                = f"{outputFolderNameGeneration}_gold.{csvFileFormat}"
-outputFileGenerationGold                                    = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameGold,
-    outputFileNameGenerationGold
-)
-
-outputFileNameGenerationGoldEmbeddings                      = f"{outputFolderNameGeneration}_gold_embeddings.{csvFileFormat}"
-outputFileGenerationGoldEmbeddings                          = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameGold,
-    outputFileNameGenerationGoldEmbeddings
-) 
-
-inputFileGenerationEvaluation                               = outputFileGenerationMerged
-inputFileGenerationEvaluationEmbeddings                     = outputFileGenerationMergedEmbeddings
-inputFileGenerationEvaluationGold                           = outputFileGenerationGold
-inputFileGenerationEvaluationGoldEmbeddings                 = outputFileGenerationGoldEmbeddings
-
-outputFileNameGenerationDistinctSynonymsRound               = f"{outputFolderNameGeneration}_distinct_synonyms_per_round.{plotFileFormat}"
-outputFileGenerationDistinctSynonymsRound                   = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameGenerationDistinctSynonymsRound
-) 
-outputFileNameGenerationDistinctSynonymsConcept             = f"{outputFolderNameGeneration}_distinct_synonyms_per_concept.{plotFileFormat}"
-outputFileGenerationDistinctSynonymsConcept                  = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameGenerationDistinctSynonymsConcept
-) 
-outputFileNameGenerationNewSynonymsRound                    = f"{outputFolderNameGeneration}_new_synonyms_per_round.{plotFileFormat}"
-outputFileGenerationNewSynonymsRound                         = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameGenerationNewSynonymsRound
-) 
-outputFileNameGenerationCumulativeRecallPrecision           = f"{outputFolderNameGeneration}_cumulative_recall_precision.{plotFileFormat}"
-outputFileGenerationCumulativeRecallPrecision                = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameGenerationCumulativeRecallPrecision
-) 
-outputFileNameGenerationRecallPrecisionF1Appearance         = f"{outputFolderNameGeneration}_appearance_recall_precision_f1_count.{plotFileFormat}"
-outputFileGenerationRecallPrecisionF1Appearance              = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameGenerationRecallPrecisionF1Appearance
-) 
-outputFileNameGenerationCumulativeRecallPrecisionTotal      = f"{outputFolderNameGeneration}_cumulative_recall_precision_total.{plotFileFormat}"
-outputFileGenerationCumulativeRecallPrecisionTotal           = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameGenerationCumulativeRecallPrecisionTotal
-) 
-outputFileNameGenerationRecallPrecisionF1AppearanceTotal    = f"{outputFolderNameGeneration}_appearance_recall_precision_f1_count_total.{plotFileFormat}"
-outputFileGenerationRecallPrecisionF1AppearanceTotal         = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameGenerationRecallPrecisionF1AppearanceTotal
-) 
-
-# =============================================================================
-# Files for Synonym Classification
-# =============================================================================
-
-outputFolderNameClassification                  = "classification"
-
-
-
-inputFileClassification                         = inputFileTask
-
-outputFileNameClassification                    = f"{outputFolderNameClassification}_{chainOfThoughtsStr}_{fewShotStr}_{model_name}.{csvFileFormat}"
-outputFileClassification                        = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameClassification,
-    outputFileNameClassification
-)
-
-# Contains the formatted Generated Synonyms of the Model. 
-inputFileClassificationFormatted                = outputFileClassification
-outputFileNameClassificationFormattedPrefix     = f"{outputFolderNameClassification}_{chainOfThoughtsStr}_{fewShotStr}_formatted"
-outputFileNameClassificationFormatted           = f"{outputFileNameClassificationFormattedPrefix}_{model_name}.{csvFileFormat}"
-outputFileClassificationFormatted               = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameFormatted,
-    outputFileNameClassificationFormatted
-)
-
-inputFileNameClassificationMerged               = [
-    file
-    for file in os.listdir(os.path.join(dataDir, outputFolderName, outputFolderNameFormatted))
-    if file.startswith(outputFileNameClassificationFormattedPrefix) and file.endswith(csvFileFormat)
-]
-inputFileClassificationMerged                   = [
-    os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameClassificationMerged
-]
-
-outputFileNameClassificationMerged              = f"{outputFolderNameClassification}_merged_classes.{csvFileFormat}"
-outputFileClassificationMerged                  = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameMerged,
-    outputFileNameClassificationMerged
-)
-
-inputFileClassificationEvaluation               = outputFileClassificationMerged
-
-outputFileNameClassificationGoldCounts   = f"{outputFolderNameClassification}_gold_counts.{plotFileFormat}"
-outputFileClassificationGoldCounts       = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationGoldCounts
-)
-
-evaluationClasses = [exactSynonymClass, relatedSynonymClass]
-
-outputFileNameClassificationRecallPrecisionF1   = f"{outputFolderNameClassification}_base_evaluation.{plotFileFormat}"
-outputFileClassificationRecallPrecisionF1 = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationRecallPrecisionF1
-)
-
-outputFileNameClassificationAnswerCounts   = f"{outputFolderNameClassification}_answer_counts.{plotFileFormat}"
-outputFileClassificationAnswerCounts = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationAnswerCounts
-)
-
-outputFileNameClassificationEvaluationExact     = f"{outputFolderNameClassification}_exact_evaluation.{plotFileFormat}"
-outputFileClassificationEvaluationExact         = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationEvaluationExact
-)
-
-outputFileNameClassificationEvaluationExactHPO     = f"{outputFolderNameClassification}_exact_HPO_evaluation.{plotFileFormat}"
-outputFileClassificationEvaluationExactHPO         = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationEvaluationExactHPO
-)
-
-outputFileNameClassificationEvaluationExactUBERON     = f"{outputFolderNameClassification}_exact_UBERON_evaluation.{plotFileFormat}"
-outputFileClassificationEvaluationExactUBERON         = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationEvaluationExactUBERON
-)
-outputFileNameClassificationEvaluationExactGO     = f"{outputFolderNameClassification}_exact_GO_evaluation.{plotFileFormat}"
-outputFileClassificationEvaluationExactGO         = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationEvaluationExactGO
-)
-outputFileNameClassificationEvaluationExactCHEBI     = f"{outputFolderNameClassification}_exact_CHEBI_evaluation.{plotFileFormat}"
-outputFileClassificationEvaluationExactCHEBI         = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationEvaluationExactCHEBI
-)
-
-outputFileNameClassificationAccuracyMacroMicro  = f"{outputFolderNameClassification}_accuracy_threshold.{plotFileFormat}"
-outputFileClassificationAccuracyMacroMicro      = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationAccuracyMacroMicro
-)
-
-outputFileNameClassificationClassAccuracy       = f"{outputFolderNameClassification}_class_accuracy.{plotFileFormat}"
-outputFileClassificationClassAccuracy           = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationClassAccuracy
-)
-
-# =============================================================================
-
-# =============================================================================
-# Files for Synonym Type Classification
-# =============================================================================
-
-outputFolderNameClassificationType                  = "type"
-
-
-
-inputFileClassificationType                         = inputFileTask
-
-outputFileNameClassificationType                    = f"{outputFolderNameClassificationType}_{chainOfThoughtsStr}_{fewShotStr}_{model_name}.{csvFileFormat}"
-outputFileClassificationType                            = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameClassificationType,
-    outputFileNameClassificationType
-)
-
-inputFileClassificationTypeFormatted                = outputFileClassificationType
-
-outputFileNameClassificationTypeFormattedPrefix     = f"{outputFolderNameClassificationType}_{chainOfThoughtsStr}_{fewShotStr}_formatted"
-outputFileNameClassificationTypeFormatted           = f"{outputFileNameClassificationTypeFormattedPrefix}_{model_name}.{csvFileFormat}"
-outputFileClassificationTypeFormatted               = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameFormatted,
-    outputFileNameClassificationTypeFormatted
-)
-
-inputFileNameClassificationTypeMerged               = [
-    file
-    for file in os.listdir(os.path.join(dataDir, outputFolderName, outputFolderNameFormatted))
-    if file.startswith(outputFileNameClassificationTypeFormattedPrefix) and file.endswith(csvFileFormat)
-]
-inputFileClassificationTypeMerged                   = [
-    os.path.join(dataDir, outputFolderName, outputFolderNameFormatted, filename) for filename in inputFileNameClassificationTypeMerged
-]
-
-outputFileNameClassificationTypeMerged              = f"{outputFolderNameClassificationType}_merged_classes.{csvFileFormat}"
-outputFileClassificationTypeMerged                  = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameMerged,
-    outputFileNameClassificationTypeMerged
-)
-
-inputFileClassificationTypeEvaluation               = outputFileClassificationTypeMerged
-
-outputFileNameClassificationTypeGoldCounts   = f"{outputFolderNameClassificationType}_gold_counts.{plotFileFormat}"
-outputFileClassificationTypeGoldCounts       = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeGoldCounts
-)
-
-outputFileNameClassificationTypeAnswerCounts   = f"{outputFolderNameClassificationType}_answer_counts.{plotFileFormat}"
-outputFileClassificationTypeAnswerCounts = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeAnswerCounts
-)
-
-outputFileNameClassificationTypeRecallPrecisionF1   = f"{outputFolderNameClassificationType}_base_evaluation.{plotFileFormat}"
-outputFileClassificationTypeRecallPrecisionF1       = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeRecallPrecisionF1
-)
-
-outputFileNameClassificationTYpeAccuracyMacroMicro  = f"{outputFolderNameClassificationType}_accuracy_threshold.{plotFileFormat}"
-outputFileClassificationTYpeAccuracyMacroMicro      = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTYpeAccuracyMacroMicro
-)
-
-outputFileNameClassificationTypeClassAccuracy       = f"{outputFolderNameClassificationType}_class_accuracy.{plotFileFormat}"
-outputFileClassificationTypeClassAccuracy           = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeClassAccuracy
-)
-
-outputFileNameClassificationTypeEvaluationExactHPO  = f"{outputFolderNameClassificationType}_exact_HPO_evaluation.{plotFileFormat}"
-outputFileClassificationTypeEvaluationExactHPO      = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeEvaluationExactHPO
-)
-
-outputFileNameClassificationTypeEvaluationExactUBERON  = f"{outputFolderNameClassificationType}_exact_UBERON_evaluation.{plotFileFormat}"
-outputFileClassificationTypeEvaluationExactUBERON      = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeEvaluationExactUBERON
-)
-
-outputFileNameClassificationTypeEvaluationExactGO  = f"{outputFolderNameClassificationType}_exact_GO_evaluation.{plotFileFormat}"
-outputFileClassificationTypeEvaluationExactGO      = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeEvaluationExactGO
-)
-
-outputFileNameClassificationTypeEvaluationExactCHEBI  = f"{outputFolderNameClassificationType}_exact_CHEBI_evaluation.{plotFileFormat}"
-outputFileClassificationTypeEvaluationExactCHEBI      = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeEvaluationExactCHEBI
-)
-
-outputFileNameClassificationTypeEvaluationMajority  = f"{outputFolderNameClassificationType}_majority_voting.{plotFileFormat}"
-outputFileClassificationTypeEvaluationMajority      = os.path.join(
-    dataDir,
-    outputFolderName,
-    outputFolderNameEvaluation,
-    outputFileNameClassificationTypeEvaluationMajority
-)
-
-# =============================================================================
-
-testIDs_old = list(set([
-    'HP:0001756', 'HP:0003189', 'HP:0000708', 'HP:0008069', 'HP:0009778'
-    'HP:0008331', 'HP:0007165', 'HP:0002020', 'HP:0010759', 'HP:0002659',
-    'HP:0009891', 'HP:0007018', 'HP:0032514', 'HP:0000434', 'HP:0000692', 
-    'HP:0025675', 'HP:0001511', 'HP:0000286', 'HP:0000448', 'HP:0000691', 
-    'HP:0001092', 'HP:0001315', 'HP:0000683', 'HP:0000252', 'HP:0000239', 
-    'HP:0002460', 'HP:0008180', 'HP:0025190', 'HP:0000722', 'HP:0009588', 
-    'HP:0008368', 'HP:0001631', 'HP:0000689', 'HP:6000990', 'HP:0000260', 
-    'HP:0006334', 'HP:0002069', 'HP:0000363', 'HP:0009650', 'HP:0011468', 
-    'HP:0012407', 'HP:0000474', 'HP:0009611', 'HP:0003270', 'HP:0000637', 
-    'HP:0006347', 'HP:0008066', 'HP:0008070', 'HP:0000733', 'HP:0002745', 
-    'HP:0001357', 'HP:0008163', 'HP:0002395', 'HP:0009381', 'HP:0000496', 
-    'HP:0000347', 'HP:0002213', 'HP:0005484', 'HP:0001274', 'HP:0005772', 
-    'HP:0010808', 'HP:0006897', 'HP:0033010', 'HP:0002123', 'HP:0011160', 
-    'HP:0000766', 'HP:0007906', 'HP:0007479', 'HP:0000954', 'HP:0010628', 
-    'HP:0000455', 'HP:0011072', 'HP:0032662', 'HP:0005278', 'HP:0008127', 
-    'HP:0001047', 'HP:0000198', 'HP:0100832', 'HP:0000421', 'HP:0006487', 
-    'HP:0002788', 'HP:0002719', 'HP:0000550', 'HP:0000653', 'HP:0000494', 
-    'HP:0001999', 'HP:0000158', 'HP:0031354', 'HP:5200291', 'HP:0012210', 
-    'HP:0002683', 'HP:0030447', 'HP:0007628', 'HP:0034348', 'HP:0001520', 
-    'HP:0000215', 'HP:0000175', 'HP:0010674', 'HP:0000349', 'HP:0100490', 
-    'HP:0010650', 'HP:0000848', 'HP:0001566', 'HP:0012809', 'HP:0009931', 
-    'HP:0011332', 'HP:0004209', 'HP:0005285', 'HP:0033349', 'HP:0002376', 
-    'HP:0006682', 'HP:0007700', 'HP:0032152', 'HP:0001344', 'HP:0011451', 
-    'HP:0009836', 'HP:0006986', 'HP:0001964', 'HP:0007126', 'HP:0011169', 
-    'HP:0002495', 'HP:0000973', 'HP:0002119', 'HP:0002089', 'HP:0000275', 
-    'HP:0002121', 'HP:0000272', 'HP:0011120', 'HP:0006323', 'HP:0200039',
-    'HP:0001841', 'HP:0000444', 'HP:0000528', 'HP:0003812', 'HP:0009940', 
-    'HP:0000283', 'HP:0000736', 'HP:0010757', 'HP:0001141', 'HP:0006329', 
-    'HP:0008873', 'HP:0002936', 'HP:0006482', 'HP:0006262', 'HP:0002286', 
-    'HP:0010701', 'HP:0004315', 'HP:0003565', 'HP:0011832', 'HP:0005261', 
-    'HP:0002166', 'HP:0000179', 'HP:0001510', 'HP:0011831', 'HP:0020220', 
-    'HP:0000601', 'HP:0000551', 'HP:0000519', 'HP:0009237', 'HP:0004691', 
-    'HP:0001382', 'HP:0010885', 'HP:0010107', 'HP:0011675', 'HP:0000418', 
-    'HP:0003557', 'HP:0002349', 'HP:0010049', 'HP:0001106', 'HP:0011823', 
-    'HP:0000337', 'HP:0000882', 'HP:0031843', 'HP:0000745', 'HP:0012799', 
-    'HP:0012810', 'HP:0000384', 'HP:0010289', 'HP:0000270', 'HP:0001622', 
-    'HP:0003473', 'HP:0010055', 'HP:0008527', 'HP:0006721', 'HP:0410334', 
-    'HP:0002925', 'HP:0002061', 'HP:0100716', 'HP:0000256', 'HP:0000670', 
-    'HP:0001988', 'HP:0005914', 'HP:0001308', 'HP:0010669', 'HP:0000520', 
-    'HP:0011432', 'HP:0009612', 'HP:0003022', 'HP:0008672', 'HP:0000992', 
-    'HP:0005978', 'HP:0034984', 'HP:0009102', 'HP:0006297', 'HP:0000377', 
-    'HP:0000430', 'HP:0010702', 'HP:0002910', 'HP:0002283', 'HP:0000680', 
-    'HP:0001249', 'HP:0010813', 'HP:0005280', 'HP:0003710', 'HP:0002384', 
-    'HP:0008905', 'HP:0000292', 'HP:0430028', 'HP:0003301', 'HP:0011073', 
-    'HP:0006308', 'HP:0002705', 'HP:0100543', 'HP:0006288', 'HP:0011159', 
-    'HP:0010741', 'HP:0009085', 'HP:0011829', 'HP:0003083', 'HP:0400000', 
-    'HP:0000654', 'HP:0000975', 'HP:0012471', 'HP:0001840', 'HP:0010751', 
-    'HP:0000995', 'HP:0006349', 'HP:0000463', 'HP:0032795', 'HP:0002216', 
-    'HP:0002091', 'HP:0006321', 'HP:0004488', 'HP:0003781', 'HP:0004227', 
-    'HP:0009058', 'HP:0009939', 'HP:0001831', 'HP:0003141', 'HP:0003236', 
-    'HP:0000698', 'HP:0000278', 'HP:0006313', 'HP:0100851', 'HP:0100540', 
-    'HP:0007334', 'HP:0001162', 'HP:0003042', 'HP:0001263', 'HP:0000171', 
-    'HP:0030215', 'HP:0008151', 'HP:0033658', 'HP:0001000', 'HP:0003281', 
-    'HP:0000750', 'HP:0001900', 'HP:0001288', 'HP:0002711', 'HP:0000544', 
-    'HP:0002500', 'HP:0000940', 'HP:0000188', 'HP:0005819', 'HP:0011173', 
-    'HP:0002718', 'HP:0009933', 'HP:0100804', 'HP:0033757', 'HP:0100400', 
-    'HP:0003202', 'HP:0004467', 'HP:0003025', 'HP:0002684', 'HP:0000529', 
-    'HP:0000303', 'HP:0000402', 'HP:0008419', 'HP:0010755', 'HP:0003180', 
-    'HP:0033009', 'HP:0000408', 'HP:0008518', 'HP:0000972', 'HP:0004370', 
-    'HP:0009882', 'HP:0005989', 'HP:0010743', 'HP:0001290', 'HP:0001558', 
-    'HP:0001188', 'HP:0003100', 'HP:0003387', 'HP:0011800', 'HP:0004808', 
-    'HP:0001627', 'HP:0004220', 'HP:0010819', 'HP:0003693', 'HP:0000193', 
-    'HP:0003319', 'HP:0002953', 'HP:0002757', 'HP:0005465', 'HP:0011222', 
-    'HP:0007359', 'HP:0001133', 'HP:0001377', 'HP:0000358', 'HP:0400001', 
-    'HP:0030028', 'HP:0003375', 'HP:0010313', 'HP:0008921', 'HP:0005736', 
-    'HP:0430029', 'HP:0008209', 'HP:0001270', 'HP:0000403', 'HP:0000426', 
-    'HP:0003324', 'HP:0003700', 'HP:0000574', 'HP:0009177', 'HP:0002010', 
-    'HP:0001363', 'HP:0009930', 'HP:0000191', 'HP:0005323', 'HP:0005792', 
-    'HP:0000276', 'HP:0002209', 'HP:0000221', 'HP:0002197', 'HP:0001338', 
-    'HP:0009803', 'HP:0004319', 'HP:0000356', 'HP:0000431', 'HP:0005152', 
-    'HP:0012720', 'HP:0006380', 'HP:0011166', 'HP:0007814', 'HP:0005790', 
-    'HP:0002720', 'HP:0009019', 'HP:0003015', 'HP:0000119', 'HP:0003261', 
-    'HP:0002984', 'HP:0030318', 'HP:0002398', 'HP:0009835', 'HP:0010034', 
-    'HP:0000457', 'HP:0003774', 'HP:0009920', 'HP:0000445', 'HP:0010537', 
-    'HP:0005274', 'HP:0006498', 'HP:0001762', 'HP:0012292', 'HP:0002694', 
-    'HP:0000274', 'HP:0011167', 'HP:0030319', 'HP:0000327', 'HP:0000319', 
-    'HP:0100723', 'HP:0000490', 'HP:0040217', 'HP:0003762', 'HP:0034353', 
-    'HP:0011069', 'HP:0006532', 'HP:0010972', 'HP:0000324', 'HP:0002094', 
-    'HP:0000684', 'HP:0000582', 'HP:0001476', 'HP:0003200', 'HP:0001195', 
-    'HP:0006335', 'HP:0000010', 'HP:0030393', 'HP:0002282', 'HP:0006315', 
-    'HP:0009601', 'HP:0006336', 'HP:0002681', 'HP:0008551', 'HP:0009244', 
-    'HP:0011219', 'HP:0012811', 'HP:0000341', 'HP:0000762', 'HP:0002194', 
-    'HP:0002682', 'HP:0003687', 'HP:0410246', 'HP:0000687', 'HP:0000413', 
-    'HP:0000218', 'HP:0000316', 'HP:0001254', 'HP:0009746', 'HP:0002922', 
-    'HP:0004313', 'HP:0001635', 'HP:0002553', 'HP:0007378', 'HP:0002750', 
-    'HP:0001852', 'HP:0007968', 'HP:0000592', 'HP:0009843', 'HP:0005272',
-    'HP:0004331', 'HP:0011153', 'HP:0003155', 'HP:0000437'
-]))
-
-testIDs = [         'CHEBI:4167',       'UBERON:0006440',   'CHEBI:23449',
- 'UBERON:0005010',  'CHEBI:3892',       'CHEBI:50112',      'CHEBI:17883',
- 'HP:0100171',      'CHEBI:32612',      'CHEBI:18258',      'HP:0008067',
- 'UBERON:0004938',  'CHEBI:76871',      'UBERON:0000933',   'GO:1905155',
- 'CHEBI:33424',     'HP:0025780',       'UBERON:0002369',   'CHEBI:35366',
- 'UBERON:0002020',  'UBERON:0004998',   'HP:0100439',       'UBERON:0001489',
- 'UBERON:0006052',  'HP:0200153',       'PR:000001968',     'CHEBI:18257',
- 'UBERON:0004230',  'GO:1904747',       'UBERON:0003635',   'HP:0011117',
- 'UBERON:0010948',  'CHEBI:32563',      'CHEBI:17196',      'UBERON:0005019',
- 'UBERON:0002386',  'CHEBI:37024',      'CL:0000981',       'PR:000001006',
- 'UBERON:0006946',  'CHEBI:15681',      'UBERON:0004066',   'UBERON:0003625',
- 'UBERON:0005969',  'CHEBI:37848',      'CHEBI:16134',      'CHEBI:35219',
- 'GO:1904746',      'CHEBI:16113',      'UBERON:0006858',   'HP:0006505',
- 'UBERON:0009472',  'CHEBI:17933',      'HP:0000327',       'CHEBI:48376',
- 'CHEBI:133608']
-
-testIDs2 = [         'HP:0020059',       'UBERON:0002318',   'HP:0012490',
- 'CHEBI:28044',     'CHEBI:59549',      'UBERON:0007779',   'GO:1901731', 
- 'HP:0004401',      'UBERON:0006274',   'HP:0000723',       'CHEBI:134251', 
- 'UBERON:0001183',  'HP:6000451',       'HP:0002813',       'UBERON:0006652', 
- 'CHEBI:27311',     'CHEBI:73558',      'HP:0005609',       'HP:0000690', 
- 'HP:0012071',      'UBERON:0004316',   'CL:0000971',       'PR:000001318', 
- 'HP:0100121',      'CHEBI:26607',      'UBERON:0003837',   'CL:0002104', 
- 'CHEBI:35219',     'UBERON:0001601',   'HP:0012225',       'UBERON:0009984', 
- 'HP:0009931',      'UBERON:0004066',   'UBERON:0002352',   'UBERON:0008594',
- 'CHEBI:28616',     'HP:0000322',       'UBERON:0003663',   'HP:0025693', 
- 'CL:0000748',      'UBERON:0006075',   'HP:0100094',       'UBERON:0006810', 
- 'UBERON:0002326',  'CHEBI:23116',      'CHEBI:46662',      'HP:0100072', 
- 'UBERON:0004734',  'HP:0031353',       'CHEBI:35679',      'HP:0010077', 
- 'CHEBI:37808',     'UBERON:0003450',   'CHEBI:25235',      'HP:0010744',
- 'UBERON:0001534',  'HP:0100056',       'CHEBI:50315',      'HP:0002398',
- 'CHEBI:35137',     'UBERON:0005454',   'HP:0008724',       'CHEBI:48359',
- 'CHEBI:28600',     'UBERON:0000168',   'UBERON:0001543',   'HP:0001392',
- 'HP:0030835',      'UBERON:0006946',   'HP:0006611',       'CHEBI:9300',
- 'UBERON:0003533',  'CHEBI:38807',      'HP:0100192',       'CHEBI:27891',
- 'CHEBI:90318',     'UBERON:0012367',   'HP:0004370',       'UBERON:0004292',
- 'HP:0002571',      'CHEBI:15756',      'HP:0002846',       'CHEBI:58389',
- 'HP:0009182',      'UBERON:0006722',   'UBERON:0006858',   'CL:0000169',
- 'CHEBI:33250',     'PR:000001006',     'HP:0009554',       'CHEBI:50733',
- 'CHEBI:356416',    'GO:0004565',       'CHEBI:28842',      'CHEBI:33552',
- 'GO:0050769',      'UBERON:0007241',   'UBERON:0005010',   'CHEBI:37024', 
- 'HP:0030445',      'GO:0051130',       'HP:0002681',       'UBERON:0007567',
- 'HP:0000745',      'PR:000001255',     'CHEBI:35269',      'UBERON:0012072',
- 'CHEBI:48376',     'UBERON:0000015',   'GO:0003857',       'CHEBI:16113',
- 'CHEBI:46787',     'CHEBI:16831',      'CHEBI:36309',      'CHEBI:63624',
- 'CHEBI:15681',     'HP:0001991',       'UBERON:0002483',   'HP:0005280',
- 'GO:0004930',      'UBERON:0000998',   'UBERON:0018413',   'HP:6000643',
- 'UBERON:0001740',  'HP:0010109',       'CHEBI:58496',      'HP:0003191',
- 'UBERON:0019200',  'UBERON:0009472',   'HP:0002863',       'UBERON:0004122',
- 'CHEBI:78804',     'HP:6001162',       'HP:0011744',       'UBERON:0002059',
- 'UBERON:0001985',  'UBERON:0004470',   'UBERON:0009680',   'UBERON:0004941',
- 'HP:0006339',      'UBERON:0010952',   'HP:0025347',       'UBERON:0002240',
- 'HP:0020150',      'UBERON:0018415',   'HP:0003233',       'CHEBI:133608',
- 'UBERON:0003729',  'UBERON:0002453',   'CHEBI:27026',      'UBERON:0008785',
- 'CHEBI:33662',     'PR:000001308',     'UBERON:0006645',   'HP:0009521',
- 'UBERON:0006440',  'CHEBI:35821',      'UBERON:0012314',   'UBERON:0001567',
- 'UBERON:0000401',  'UBERON:0013757',   'UBERON:0000200',   'UBERON:0003066',
- 'HP:0002637',      'UBERON:0004148',   'CHEBI:76713',      'CHEBI:26078',
- 'CHEBI:23449',     'UBERON:0004175',   'HP:0000654',       'HP:0012537',
- 'GO:0065003',      'UBERON:0010948',   'CHEBI:140325',     'HP:0010750',
- 'CHEBI:16375',     'CHEBI:48560',      'CHEBI:59888',      'CHEBI:16199',
- 'UBERON:0004704',  'HP:0100742',       'UBERON:0008585',   'UBERON:0002125',
- 'GO:2000253',      'HP:0002239',       'HP:0001852',       'HP:0025321',
- 'HP:0000973',      'CHEBI:58080',      'UBERON:0005969',   'UBERON:0002382',
- 'GO:0045787',      'UBERON:0004367',   'UBERON:0005043',   'CHEBI:37257',
- 'UBERON:0003625',  'HP:0004936',       'HP:0005306',       'CHEBI:17368',
- 'GO:0009056',      'UBERON:0002529',   'UBERON:0003930',   'UBERON:0014454',
- 'GO:0006915',      'CHEBI:43474',      'CHEBI:26816',      'HP:0010956',
- 'HP:0000482',      'GO:0051726',       'HP:0025448',       'HP:0012576',
- 'CHEBI:30769',     'UBERON:0007617',   'CHEBI:17203',      'CHEBI:17033',
- 'HP:0001658',      'PR:000001968',     'CHEBI:83820',      'HP:0001989',
- 'CHEBI:11851',     'HP:0034581',       'UBERON:0035804',   'CHEBI:60065',
- 'UBERON:0004067',  'HP:0002206',       'UBERON:0009914',   'UBERON:0003301',
- 'UBERON:0006660',  'CHEBI:18258',      'UBERON:0004275',   'HP:0011072',
- 'UBERON:0003283',  'UBERON:0001304',   'UBERON:0007827',   'CHEBI:18259',
- 'UBERON:0013767',  'PR:000016401',     'HP:0010385',       'HP:0000327',
- 'CHEBI:16015',     'HP:0032360',       'UBERON:8410001',   'UBERON:0002076',
- 'HP:0025289',      'UBERON:0003846',   'UBERON:0002033',   'HP:0003029', 
- 'UBERON:0002094',  'HP:0007924',       'GO:0042101',       'HP:0012763',
- 'GO:0050801',      'UBERON:0004913',   'CHEBI:33568',      'HP:0045043',
- 'PATO:0002324',    'GO:1904746',       'CHEBI:38180',      'CHEBI:64570',
- 'HP:0410058',      'UBERON:0015789',   'UBERON:0003635',   'CHEBI:21547',
- 'CHEBI:17272',     'UBERON:0004223',   'CHEBI:30745',      'CHEBI:139589',
- 'HP:0001732',      'CHEBI:83925',      'UBERON:0001161',   'UBERON:0001125',
- 'UBERON:0001224',  'HP:0012878',       'HP:0009154',       'CHEBI:32507',
- 'GO:1903524',      'CHEBI:22653',      'CHEBI:65065',      'CHEBI:17634',
- 'HP:0005997',      'UBERON:0003481',   'HP:0009213',       'UBERON:0004997',
- 'HP:0012893',      'UBERON:0010273',   'GO:0030217',       'HP:0011093',
- 'CL:0000049',      'HP:0002538',       'HP:0009459',       'CHEBI:3892',
- 'CHEBI:24621',     'HP:0200154',       'UBERON:0013501',   'HP:6000414',
- 'UBERON:0004228',  'HP:0030140',       'HP:0034491',       'UBERON:0003553',
- 'HP:0000970',      'UBERON:0005185',   'UBERON:0001507',   'GO:1904099',
- 'UBERON:0002149',  'UBERON:0016526',   'CHEBI:33558',      'UBERON:0014872',
- 'UBERON:0011215',  'UBERON:0005028',   'HP:0031170',       'CHEBI:58001',
- 'UBERON:0002516',  'CHEBI:17053',      'CHEBI:60039',      'GO:0009057', 
- 'UBERON:0011132',  'HP:5200273',       'HP:0000653',       'GO:1904747',
- 'HP:0034079',      'CHEBI:3424',       'HP:0006155',       'HP:0033842',
- 'HP:0005550',      'UBERON:0002416',   'UBERON:0004445',   'CHEBI:35191',
- 'UBERON:0001562',  'GO:1903771',       'CHEBI:138675',     'CHEBI:28789',
- 'GO:1901657',      'PR:000001004',     'UBERON:0002400']
+# The number of experiments, for the shell scripts (start.sh, finalize.sh).
+if __name__ == "__main__":
+    print(len(syngenConfig.experiments))

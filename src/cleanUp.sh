@@ -1,9 +1,0 @@
-rm ../data/logs/*
-rm ../data/output/format/*
-rm ../data/output/generation/*
-rm ../data/output/gold/*
-rm ../data/output/evaluate/*
-rm ../data/output/merge/*
-rm ../data/output/transform/*
-rm ../data/output/classification/*
-rm ../data/output/type/*

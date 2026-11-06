@@ -1,5 +1,5 @@
-./data/input/hp.owl
-
+data/input/*
+!data/input/README.md
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -207,3 +207,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# syngen's run output
+data/slurmlogs/*.out
+data/slurmlogs/*.err
+data/tmp/
+data/output/embedded/*.json
+*.lock
+data/cache/

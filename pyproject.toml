@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syngen"
+description = "Generates synonyms of Human Phenotype Ontology concepts with an LLM, PubMed and ConceptNet, and evaluates them."
+readme = "README.md"
+version = "2.0.0"
+# model and embedder require Python 3.10.
+requires-python = ">=3.10"
+authors = [{ name = "Peter Pallaoro", email = "peter.pallaoro@tum.de" }]
+dependencies = [
+    # All sibling packages pin logger v1.7.0, so syngen does too.
+    "logger @ git+https://github.com/Goldkugel/logger.git@v1.7.0",
+    "adapter @ git+https://github.com/Goldkugel/adapter.git@v1.6.0",
+    "embedder @ git+https://github.com/Goldkugel/embedder.git@v2.5.0",
+    "model @ git+https://github.com/Goldkugel/model.git@v3.1.0",
+    "normalizer @ git+https://github.com/Goldkugel/normalizer.git@v1.1.3",
+    # config.py reads and validates the configuration file itself.
+    "pydantic>=2",
+    "pyyaml",
+    "numpy",
+    # The normalizer's spaCy 3.7 does not support numpy 2, which pandas 3 needs.
+    "pandas<3",
+    # SynGenPubMed.py: the E-utilities of PubMed and the NER model.
+    "requests",
+    "transformers",
+    # SynGenEval.py.
+    "matplotlib"
+]
+
+[project.optional-dependencies]
+test = ["pytest>=6"]
+
+[project.urls]
+Repository = "https://github.com/Goldkugel/syngen"
+
+[tool.setuptools]
+packages = ["syngen"]
+
+[tool.setuptools.package-dir]
+"syngen" = "src"
+
+[tool.pytest.ini_options]
+python_files = ["*Test.py"]
