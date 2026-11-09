@@ -761,8 +761,13 @@ def developmentConcepts() -> set:
     hpo.development.csv (the others only give the labels of parents and
     children).
     """
-    exitIfFileNotExist(outputFileTransformedDevelopment)
-    development = readCSV(outputFileTransformedDevelopment)
+    # With "test" the task is the development set, which readTask() has read
+    # already.
+    if inputFileTask == outputFileTransformedDevelopment:
+        development = readTask()
+    else:
+        exitIfFileNotExist(outputFileTransformedDevelopment)
+        development = readCSV(outputFileTransformedDevelopment)
     return set(development.loc[development[attributeColumn] == synonymAttribute, idColumn])
 
 @functools.lru_cache(maxsize = 1)
