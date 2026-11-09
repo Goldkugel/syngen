@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "syngen"
 description = "Generates synonyms of Human Phenotype Ontology concepts with an LLM, PubMed and ConceptNet, and evaluates them."
 readme = "README.md"
-version = "2.0.1"
+version = "2.0.2"
 # model and embedder require Python 3.10.
 requires-python = ">=3.10"
 authors = [{ name = "Peter Pallaoro", email = "peter.pallaoro@tum.de" }]
@@ -26,7 +26,10 @@ dependencies = [
     # SynGenPubMed.py: the E-utilities of PubMed and the NER model.
     "requests",
     "torch",
-    "transformers",
+    # Below 5: transformers 5 removed tokenizer attributes vLLM reads when it
+    # loads a model ("Qwen2Tokenizer has no attribute
+    # all_special_tokens_extended").
+    "transformers>=4.45,<5",
     # SynGenEval.py.
     "matplotlib"
 ]
