@@ -24,8 +24,8 @@ syngen:
   # SynGenLLM.py: every concept is prompted `rounds` times (seed, seed + 1,
   # ...); a synonym counts how many rounds generated it.
   llm:
-    rounds: 5
-    max_synonyms: 10
+    rounds: 50
+    max_synonyms: 25
   # SynGenPubMed.py: the label and all LLM synonyms of a concept are searched
   # in the titles and abstracts published up to max_date.
   pubmed:
@@ -37,7 +37,7 @@ syngen:
     api_key_variable: "NCBI_API_KEY"
     requests_per_second: 3
     retries: 5
-    email: null
+    email: "peter.pallaoro@tum.de"
     cache_file: "./data/cache/pubmed/pubmed.sqlite"
     ner_model: "d4data/biomedical-ner-all"
     ner_batch_size: 64
@@ -50,7 +50,7 @@ syngen:
     # Per concept: the candidates at least this similar to the label, at most
     # max_candidates of them.
     min_similarity: 0.85
-    max_candidates: 10
+    max_candidates: 15
   # SynGenConceptNet.py: the words of the label and of the synonyms of these
   # sources are replaced by their ConceptNet neighbours.
   conceptnet:
@@ -77,7 +77,7 @@ syngen:
     filter_temperature: 0.01
     filter_chunk: 20
     min_similarity: 0.85
-    max_candidates: 10
+    max_candidates: 15
   # Name of a model of embedder.model_id in the column names; by default its
   # ID without the organisation.
   embedding_model_names: {}
@@ -141,7 +141,7 @@ llm:
   enable_thinking: null
   reasoning_start_tag: "<think>"
   reasoning_end_tag: "</think>"
-  max_tokens: 1024
+  max_tokens: 8192
   chunk_size: 500
   # Used by their index: 0 generates the synonyms, 1 is the ConceptNet filter.
   prompt_folder: "./prompts/"
