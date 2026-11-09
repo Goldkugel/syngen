@@ -21,8 +21,8 @@ three steps, which hand their results on in files:
     python3 ./src/SynGenConceptNet.py <index> [<model>] --filter   model
     python3 ./src/SynGenConceptNet.py <index> [<model>] --build    normalizer
 
---filter does nothing if syngen.conceptnet.filter is off. The database is
-built once by SynGenConceptNetDB.py.
+If syngen.conceptnet.filter is off, --filter does nothing and --spans builds
+the terms as well. The database is built once by SynGenConceptNetDB.py.
 """
 
 import itertools
@@ -411,6 +411,15 @@ def main() -> None:
         return
     if chosen[0] == "--filter" and not conceptnetConfig.filter:
         l.log("syngen.conceptnet.filter is off; the neighbours are not filtered.")
+        return
+
+    # Without the filter no LLM is needed in between: --spans builds the
+    # terms as well.
+    if chosen[0] == "--spans" and not conceptnetConfig.filter:
+        def spansAndBuild(modelID : str) -> None:
+            findSpans(modelID)
+            buildTerms(modelID)
+        runForModels("Building synonyms with ConceptNet", spansAndBuild)
         return
 
     runForModels(*steps[chosen[0]])

@@ -2,7 +2,7 @@
 
 clear
 
-# Run from the Python environment of the normalizer (as generate_normalizer.sh).
+# Run from the Python environment of the normalizer (as generate_sources.sh).
 
 # Brings the transformed HPO and the sets up to date.
 python3 ./src/SynGenLLM.py || exit 1

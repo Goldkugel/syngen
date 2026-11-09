@@ -47,8 +47,9 @@ syngen/
 │   └── README.md
 ├── tests/                   # Unit tests (pytest)
 ├── start.sh                 # Preparation run, then one job per experiment for a step
-├── generate_llm.sh          # Slurm job: the steps of one experiment that run the LLM
-├── generate_normalizer.sh   # Slurm job: the steps of one experiment that need the normalizer
+├── generate_llm.sh          # Slurm job: LLM generation of one experiment
+├── generate_sources.sh      # Slurm job: PubMed and ConceptNet stages of one experiment
+├── filter_llm.sh            # Slurm job: LLM filter of the ConceptNet stage of one experiment
 ├── finalize.sh              # Embeds and evaluates every experiment
 ├── cleanUp.sh               # Deletes logs, synonyms and evaluations
 ├── pyproject.toml
@@ -68,7 +69,7 @@ python3 -m venv ~/venvs/syngen-normalizer
 ~/venvs/syngen-normalizer/bin/pip install -e ".[normalizer]"
 ```
 
-The steps that run the LLM (`generate_llm.sh`) use the first, all others (`generate_normalizer.sh`, `finalize.sh`, the tests) the second. The scripts do not activate an environment: activate it before starting a script; `sbatch` passes it on to the job.
+The scripts that run the LLM (`generate_llm.sh`, `filter_llm.sh`) use the first, all others (`generate_sources.sh`, `finalize.sh`, the tests) the second. The scripts do not activate an environment: activate it before starting a script; `sbatch` passes it on to the job.
 
 Inputs (see [`data/input/README.md`](data/input/README.md)):
 
@@ -84,13 +85,15 @@ All scripts are run from the repository root.
 
    | Step | Environment | Script | What it does |
    |---|---|---|---|
-   | `./start.sh llm` | LLM | `generate_llm.sh llm` | The LLM stage: generates the synonyms |
-   | `./start.sh pubmed` | normalizer | `generate_normalizer.sh pubmed` | Marks the LLM synonyms equal to their label, the PubMed stage, the spans of the ConceptNet stage |
-   | `./start.sh filter` | LLM | `generate_llm.sh filter` | The LLM filters the ConceptNet neighbours (nothing if `syngen.conceptnet.filter` is off) |
-   | `./start.sh conceptnet` | normalizer | `generate_normalizer.sh conceptnet` | The ConceptNet stage: builds and ranks the new terms |
+   | Step | Environment | Script | What it does |
+   |---|---|---|---|
+   | `./start.sh llm` | LLM | `generate_llm.sh` | LLM generation |
+   | `./start.sh sources` | normalizer | `generate_sources.sh` | Marks the LLM synonyms equal to their label, the PubMed stage, the spans of the ConceptNet stage; without `syngen.conceptnet.filter` also the ConceptNet terms, which ends the generation |
+   | `./start.sh filter` | LLM | `filter_llm.sh` | The LLM filters the ConceptNet neighbours |
+   | `./start.sh build` | normalizer | `generate_sources.sh --build` | The ConceptNet stage: builds and ranks the new terms |
 
-   A single experiment runs with `sbatch generate_llm.sh <step> <index> [<model ID>]` or `sbatch generate_normalizer.sh <step> <index> [<model ID>]`.
-2. **PubMed without internet on the compute nodes:** after the `llm` step, run `python3 ./src/SynGenLLM.py <index> --mark` and `python3 ./src/SynGenPubMed.py <index> --fetch` on the login node (normalizer environment) to fill the cache, then start the `pubmed` step.
+   A single experiment runs with `sbatch <script> <index> [<model ID>]` (and `--build` for the last step).
+2. **PubMed without internet on the compute nodes:** after the `llm` step, run `python3 ./src/SynGenLLM.py <index> --mark` and `python3 ./src/SynGenPubMed.py <index> --fetch` on the login node (normalizer environment) to fill the cache, then start the `sources` step.
 3. **Evaluate:** when the jobs are done, `./finalize.sh` (normalizer environment) embeds and evaluates the synonyms of every experiment.
 
 | Command | What it does |
@@ -99,7 +102,7 @@ All scripts are run from the repository root.
 | `python3 ./src/SynGenLLM.py <index> [<model ID>]` | LLM stage of experiment `syngen.experiments[<index>]` (from 0) with every model of `llm.model_id` (or the given one): generates the synonyms (LLM environment) |
 | `python3 ./src/SynGenLLM.py <index> [<model ID>] --mark` | Marks the synonyms equal to their label and writes the file of the LLM stage (normalizer environment) |
 | `python3 ./src/SynGenPubMed.py <index> [<model ID>] [--fetch]` | PubMed stage; with `--fetch` only searches and fetches the articles |
-| `python3 ./src/SynGenConceptNet.py <index> [<model ID>] --spans\|--filter\|--build` | ConceptNet stage in three steps: the spans and their neighbours (normalizer), the LLM filter (LLM), the new terms (normalizer) |
+| `python3 ./src/SynGenConceptNet.py <index> [<model ID>] --spans\|--filter\|--build` | ConceptNet stage in three steps: the spans and their neighbours (normalizer), the LLM filter (LLM), the new terms (normalizer); without `syngen.conceptnet.filter`, `--spans` builds the terms as well |
 | `python3 ./src/SynGenConceptNetDB.py` | Builds the ConceptNet database from the dump |
 | `python3 ./src/SynGenEmbed.py <index> [<model ID>]` | Normalises and embeds the generated and gold synonyms |
 | `python3 ./src/SynGenEval.py <index> [<model ID>]` | Evaluates the synonyms |
