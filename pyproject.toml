@@ -6,35 +6,49 @@ build-backend = "setuptools.build_meta"
 name = "syngen"
 description = "Generates synonyms of Human Phenotype Ontology concepts with an LLM, PubMed and ConceptNet, and evaluates them."
 readme = "README.md"
-version = "2.0.2"
+version = "2.1.0"
 # model and embedder require Python 3.10.
 requires-python = ">=3.10"
 authors = [{ name = "Peter Pallaoro", email = "peter.pallaoro@tum.de" }]
+# What every script needs. The model package (vLLM) and the normalizer
+# (spaCy) need library versions that cannot be installed together, so each
+# gets its own environment: pip install -e ".[llm]" for generate_llm.sh and
+# pip install -e ".[normalizer]" for generate_normalizer.sh and finalize.sh.
 dependencies = [
     # All sibling packages pin logger v1.7.0, so syngen does too.
     "logger @ git+https://github.com/Goldkugel/logger.git@v1.7.0",
     "adapter @ git+https://github.com/Goldkugel/adapter.git@v1.6.0",
-    "embedder @ git+https://github.com/Goldkugel/embedder.git@v2.5.0",
-    "model @ git+https://github.com/Goldkugel/model.git@v3.2.0",
-    "normalizer @ git+https://github.com/Goldkugel/normalizer.git@v1.1.3",
     # config.py reads and validates the configuration file itself.
     "pydantic>=2",
     "pyyaml",
     "numpy",
+    "pandas"
+]
+
+[project.optional-dependencies]
+# The LLM stage and the filter of the ConceptNet stage.
+llm = [
+    "model @ git+https://github.com/Goldkugel/model.git@v3.2.0",
+    # Below 5: transformers 5 removed tokenizer attributes vLLM reads when it
+    # loads a model ("Qwen2Tokenizer has no attribute
+    # all_special_tokens_extended").
+    "transformers>=4.45,<5"
+]
+# Marking, the PubMed stage, the spans and terms of the ConceptNet stage,
+# embedding and evaluation.
+normalizer = [
+    "normalizer @ git+https://github.com/Goldkugel/normalizer.git@v1.1.3",
+    "embedder @ git+https://github.com/Goldkugel/embedder.git@v2.5.0",
     # The normalizer's spaCy 3.7 does not support numpy 2, which pandas 3 needs.
     "pandas<3",
     # SynGenPubMed.py: the E-utilities of PubMed and the NER model.
     "requests",
     "torch",
-    # Below 5: transformers 5 removed tokenizer attributes vLLM reads when it
-    # loads a model ("Qwen2Tokenizer has no attribute
-    # all_special_tokens_extended").
     "transformers>=4.45,<5",
     # SynGenEval.py.
     "matplotlib"
 ]
-
-[project.optional-dependencies]
+# The tests import the normalizer: install them with ".[normalizer,test]".
 test = ["pytest>=6"]
 
 [project.urls]

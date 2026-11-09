@@ -83,6 +83,18 @@ def testMarkAsLabel():
     marked = markAsLabel(synonyms, {"HP:1" : "Short stature"})
     assert marked[asLabelColumn].tolist() == [True, True, False]
 
+def testStageWithoutCandidatesKeepsAsLabel(tmp_path, monkeypatch):
+    # A stage that finds nothing keeps the as_label of the stages before.
+    import SynGenUtils
+    file = str(tmp_path / "stage.csv")
+    monkeypatch.setattr(SynGenUtils, "outputFileStage", lambda stage, modelName: file)
+    previous = markAsLabel(synonymFrame([
+        {idColumn : "HP:1", synonymColumn : "short stature", sourceColumn : llmStage},
+        {idColumn : "HP:1", synonymColumn : "Small stature", sourceColumn : llmStage}]),
+        {"HP:1" : "Short stature"})
+    writeStage(pubmedStage, "model", previous, synonymFrame([]), {"HP:1" : "Short stature"})
+    assert readSynonyms(file)[asLabelColumn].tolist() == [True, False]
+
 def testRankCandidates(monkeypatch):
     import SynGenUtils
     monkeypatch.setattr(SynGenUtils, "similarities",

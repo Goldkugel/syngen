@@ -220,6 +220,25 @@ def outputFileLLMRaw(modelName : str) -> str:
     return outputPath(llmStage,
         f"{llmStage}_{generationStr}_raw_{modelName}.{csvFileFormat}")
 
+# The steps of a stage that need the model package and those that need the
+# normalizer run in different Python environments (see generate_llm.sh and
+# generate_normalizer.sh) and hand their results on in these files.
+
+def outputFileLLMUnmarked(modelName : str) -> str:
+    """The synonyms of the LLM before markAsLabel() (SynGenLLM.py --mark)."""
+    return outputPath(llmStage,
+        f"{llmStage}_{generationStr}_unmarked_{modelName}.{csvFileFormat}")
+
+def outputFileConceptNetSpans(modelName : str) -> str:
+    """The seeds, their spans and the neighbours of the spans (--spans)."""
+    return outputPath(conceptnetStage,
+        f"{conceptnetStage}_{generationStr}_{stagesStr(conceptnetStage)}_spans_{modelName}.{jsonFileFormat}")
+
+def outputFileConceptNetFilter(modelName : str) -> str:
+    """The neighbours the LLM kept per concept and span (--filter)."""
+    return outputPath(conceptnetStage,
+        f"{conceptnetStage}_{generationStr}_{stagesStr(conceptnetStage)}_filter_{modelName}.{jsonFileFormat}")
+
 # The last stage of the experiment, whose file holds all synonyms.
 finalStage = experimentStages[-1]
 

@@ -13,13 +13,21 @@ inflections and spellings are not generated with the SPECIALIST Lexicon
 the label is not rewritten structurally (e.g. "X of Y" -> "Y X"), as the
 normalised match ignores word order and stop words.
 
-    python3 ./src/SynGenConceptNet.py <index> [<model>]
+The spans are found with the normalizer's spaCy model and the filter runs the
+LLM, which need different Python environments; the stage therefore runs in
+three steps, which hand their results on in files:
 
-The database is built once by SynGenConceptNetDB.py.
+    python3 ./src/SynGenConceptNet.py <index> [<model>] --spans    normalizer
+    python3 ./src/SynGenConceptNet.py <index> [<model>] --filter   model
+    python3 ./src/SynGenConceptNet.py <index> [<model>] --build    normalizer
+
+--filter does nothing if syngen.conceptnet.filter is off. The database is
+built once by SynGenConceptNetDB.py.
 """
 
 import itertools
 import json
+import os
 import sqlite3
 import sys
 
@@ -270,12 +278,20 @@ def recombine(term : str, replacements : list) -> list[tuple[str, str]]:
 # The steps of this run.
 # ==============================================================================
 
-def runModel(modelID : str) -> None:
+def readJSON(file : str):
+    """A JSON file of a step before, which must exist."""
+    exitIfFileNotExist(file)
+    with open(file, "r", encoding = "utf-8") as f:
+        return json.load(f)
+
+def findSpans(modelID : str) -> None:
     """
-    The ConceptNet stage of the synonyms one LLM generated.
+    The first step of the ConceptNet stage of the synonyms one LLM generated
+    (normalizer): the seeds of the concepts, the spans of the seeds and per
+    concept and span the first seed with it and the neighbours of the span.
     """
     modelName = modelNameOf(modelID)
-    l.printHeader(f"Building Synonyms with ConceptNet ({modelName})")
+    l.printHeader(f"Finding the Spans for ConceptNet ({modelName})")
 
     previous    = readSynonyms(outputFileStage(previousStage(conceptnetStage), modelName))
     information = conceptInformation(readTask())
@@ -305,14 +321,55 @@ def runModel(modelID : str) -> None:
         for term in conceptTerms:
             for _, _, text in spans[term]:
                 allowed.setdefault((hpoID, text), (term, neighbours[text]))
+
+    writeJSON({
+        "seeds"   : seeds,
+        "spans"   : spans,
+        "allowed" : [[hpoID, text, term, words] for (hpoID, text), (term, words) in allowed.items()]
+    }, outputFileConceptNetSpans(modelName))
+
+def filterSpans(modelID : str) -> None:
+    """
+    The second step of the ConceptNet stage (model): the LLM keeps the
+    neighbours that can replace a span (filterNeighbours()).
+    """
+    modelName = modelNameOf(modelID)
+    l.printHeader(f"Filtering the Neighbours ({modelName})")
+
+    stored      = readJSON(outputFileConceptNetSpans(modelName))
+    information = conceptInformation(readTask())
+    with l.step("Filtering the neighbours with the LLM"):
+        questions = [(hpoID, text, term, words)
+            for hpoID, text, term, words in stored["allowed"] if len(words) > 0]
+        kept = filterNeighbours(questions, information, modelID)
+    writeJSON([[hpoID, text, sorted(words)] for (hpoID, text), words in kept.items()],
+        outputFileConceptNetFilter(modelName))
+
+def buildTerms(modelID : str) -> None:
+    """
+    The last step of the ConceptNet stage (normalizer): replaces the spans by
+    their (kept) neighbours, ranks the new terms and writes the file of the
+    stage.
+    """
+    modelName = modelNameOf(modelID)
+    l.printHeader(f"Building Synonyms with ConceptNet ({modelName})")
+
+    spansFile = outputFileConceptNetSpans(modelName)
+    stored    = readJSON(spansFile)
+    seeds     = stored["seeds"]
+    spans     = {term : [tuple(span) for span in found] for term, found in stored["spans"].items()}
+    allowed   = {(hpoID, text) : words for hpoID, text, _, words in stored["allowed"]}
     if conceptnetConfig.filter:
-        with l.step("Filtering the neighbours with the LLM"):
-            questions = [(hpoID, text, term, words) for (hpoID, text), (term, words)
-                in allowed.items() if len(words) > 0]
-            kept = filterNeighbours(questions, information, modelID)
-        allowed = {key : sorted(kept.get(key, set())) for key in allowed}
-    else:
-        allowed = {key : words for key, (_, words) in allowed.items()}
+        filterFile = outputFileConceptNetFilter(modelName)
+        if isOutdated(filterFile, [spansFile]):
+            l.error(f"{quote(os.path.basename(filterFile))} is missing or older than " \
+                f"{quote(os.path.basename(spansFile))}; run SynGenConceptNet.py --filter first.")
+            sys.exit(1)
+        kept    = {(hpoID, text) : words for hpoID, text, words in readJSON(filterFile)}
+        allowed = {key : kept.get(key, []) for key in allowed}
+
+    previous = readSynonyms(outputFileStage(previousStage(conceptnetStage), modelName))
+    labels   = labelsByConcept(readTask())
 
     with l.step("Building the new terms"):
         found = {}
@@ -333,16 +390,30 @@ def runModel(modelID : str) -> None:
             conceptnetConfig.min_similarity, conceptnetConfig.max_candidates)
     writeStage(conceptnetStage, modelName, previous, ranked, labels)
 
+# The steps of the stage: option, action and function.
+steps = {
+    "--spans"  : ("Finding the spans for ConceptNet", findSpans),
+    "--filter" : ("Filtering the neighbours with the LLM", filterSpans),
+    "--build"  : ("Building synonyms with ConceptNet", buildTerms)
+}
+
 def main() -> None:
     """
-    Runs the ConceptNet stage of the experiment for every model.
+    Runs one step of the ConceptNet stage of the experiment for every model.
     """
-    startRun()
+    startRun(allowedOptions = tuple(steps))
+    chosen = [option for option in steps if option in options]
+    if len(chosen) != 1:
+        l.error(f"Give one of the steps {applyFormat(list(steps))}.")
+        sys.exit(1)
     if conceptnetStage not in experimentStages:
         l.log(f"Experiment {experimentIndex} has no ConceptNet stage.")
         return
+    if chosen[0] == "--filter" and not conceptnetConfig.filter:
+        l.log("syngen.conceptnet.filter is off; the neighbours are not filtered.")
+        return
 
-    runForModels("Building synonyms with ConceptNet", runModel)
+    runForModels(*steps[chosen[0]])
 
 
 # vLLM starts its workers with "spawn", which imports this script again: the

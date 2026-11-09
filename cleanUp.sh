@@ -5,6 +5,7 @@
 # kept.
 rm -f ./data/logs/*.log
 rm -f ./data/output/llm/*.csv ./data/output/pubmed/*.csv ./data/output/conceptnet/*.csv
+rm -f ./data/output/conceptnet/*.json
 rm -f ./data/output/embedded/*.csv ./data/output/embedded/*.json
 rm -f ./data/output/evaluated/*.png ./data/output/evaluated/*.csv
 rm -f ./data/tmp/*.json ./data/tmp/*.lock

@@ -569,11 +569,14 @@ def markAsLabel(synonyms : pd.DataFrame, labels : dict) -> pd.DataFrame:
     labelKeys      = {hpoID : lexicalKey(label) for hpoID, label in labels.items()}
     labelNormKeys  = dict(zip(labels.keys(), normalizedKeys(list(labels.values()))))
     synonymNormKeys = normalizedKeys(synonyms[synonymColumn].tolist())
-    synonyms[asLabelColumn] = [
+    # Boolean also without synonyms: an empty float column would turn the
+    # True of the stages before into 1.0 in writeStage(), which readSynonyms()
+    # reads as False.
+    synonyms[asLabelColumn] = pd.Series([
         lexicalKey(synonym) == labelKeys.get(hpoID) or
             (key != "" and key == labelNormKeys.get(hpoID))
         for hpoID, synonym, key in zip(synonyms[idColumn], synonyms[synonymColumn], synonymNormKeys)
-    ]
+    ], index = synonyms.index, dtype = bool)
     return synonyms
 
 # ------------------------------------------------------------------------------
