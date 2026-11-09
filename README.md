@@ -46,7 +46,6 @@ syngen/
 │   ├── config.py            # Configuration, experiment, column and file names
 │   └── README.md
 ├── tests/                   # Unit tests (pytest)
-├── start.sh                 # Preparation run, then one job per experiment for a step
 ├── generate_llm.sh          # Slurm job: LLM generation of one experiment
 ├── generate_sources.sh      # PubMed and ConceptNet stages of one experiment (no Slurm job)
 ├── filter_llm.sh            # Slurm job: LLM filter of the ConceptNet stage of one experiment
@@ -81,17 +80,17 @@ Inputs (see [`data/input/README.md`](data/input/README.md)):
 
 All scripts are run from the repository root.
 
-1. **Generate:** the generation runs in four steps; `./start.sh <step>` runs the preparation (transforms the HPO, draws the development and evaluation set and the few-shot examples, each only if needed) and runs the step for every experiment, with every model: the LLM steps as one Slurm job per experiment, `sources` and `build` directly (they need no GPU but internet access for PubMed, e.g. on the login node), one experiment after the other. Start a step once the step before has finished for all experiments, from the environment of its script:
+1. **Prepare (optional):** `python3 ./src/SynGenLLM.py` transforms the HPO and draws the development and evaluation set and the few-shot examples, each only if needed. Every run of `SynGenLLM.py` does this first, so the first job would do it otherwise.
+2. **Generate:** the generation of experiment `syngen.experiments[<index>]` (from 0) runs in four steps, with every model of `llm.model_id` (or the given one). Start a step once the one before has finished, from the environment of its script; the LLM scripts are Slurm jobs, `generate_sources.sh` runs directly (it needs no GPU but internet access for PubMed, e.g. on the login node):
 
-   | Step | Environment | Script | What it does |
+   | Step | Environment | Command | What it does |
    |---|---|---|---|
-   | `./start.sh llm` | LLM | `generate_llm.sh` | LLM generation |
-   | `./start.sh sources` | normalizer | `generate_sources.sh` | Marks the LLM synonyms equal to their label, the PubMed stage, the spans of the ConceptNet stage; without `syngen.conceptnet.filter` also the ConceptNet terms, which ends the generation |
-   | `./start.sh filter` | LLM | `filter_llm.sh` | The LLM filters the ConceptNet neighbours |
-   | `./start.sh build` | normalizer | `generate_sources.sh --build` | The ConceptNet stage: builds and ranks the new terms |
+   | 1 | LLM | `sbatch generate_llm.sh <index> [<model ID>]` | LLM generation |
+   | 2 | normalizer | `./generate_sources.sh <index> [<model ID>]` | Marks the LLM synonyms equal to their label, the PubMed stage, the spans of the ConceptNet stage; without `syngen.conceptnet.filter` also the ConceptNet terms, which ends the generation |
+   | 3 | LLM | `sbatch filter_llm.sh <index> [<model ID>]` | The LLM filters the ConceptNet neighbours |
+   | 4 | normalizer | `./generate_sources.sh <index> [<model ID>] --build` | The ConceptNet stage: builds and ranks the new terms |
 
-   A single experiment runs with `sbatch generate_llm.sh <index> [<model ID>]`, `./generate_sources.sh <index> [<model ID>] [--build]` and `sbatch filter_llm.sh <index> [<model ID>]`.
-2. **Evaluate:** when the jobs are done, `./finalize.sh` (normalizer environment) embeds and evaluates the synonyms of every experiment.
+3. **Evaluate:** when the generation is done, `./finalize.sh` (normalizer environment) embeds and evaluates the synonyms of every experiment.
 
 | Command | What it does |
 |---|---|

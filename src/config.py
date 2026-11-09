@@ -266,6 +266,6 @@ def outputFileEvaluation(modelName : str, name : str, fileFormat : str = plotFil
         f"eval_{generationStr}_{stagesStr(finalStage)}_{modelName}_{name}.{fileFormat}")
 
 
-# The number of experiments, for the shell scripts (start.sh, finalize.sh).
+# The number of experiments, for the shell scripts (finalize.sh).
 if __name__ == "__main__":
     print(len(syngenConfig.experiments))

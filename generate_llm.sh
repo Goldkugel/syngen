@@ -10,7 +10,7 @@
 # every model of llm.model_id (or only the given one): generates the
 # synonyms, unmarked. Submit it from the Python environment of the model
 # package; sbatch passes it on to the job. The scripts of an experiment run
-# in this order (start.sh <step>):
+# in this order:
 #   generate_llm.sh               LLM generation          (model)
 #   generate_sources.sh           PubMed and ConceptNet   (normalizer)
 #   filter_llm.sh                 LLM filter              (model)
