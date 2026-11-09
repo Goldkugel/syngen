@@ -212,6 +212,5 @@ __marimo__/
 data/slurmlogs/*.out
 data/slurmlogs/*.err
 data/tmp/
-data/output/embedded/*.json
 *.lock
 data/cache/

@@ -20,12 +20,8 @@ The database is built once by SynGenConceptNetDB.py.
 
 import itertools
 import json
-import logging
-import shlex
 import sqlite3
 import sys
-
-import pandas as pd
 
 sys.dont_write_bytecode = True
 
@@ -46,6 +42,9 @@ filterPromptIndex = 1
 # and ends with.
 contentPOS = {"NOUN", "PROPN", "ADJ", "VERB", "ADV"}
 
+# Rows per SQL query with IN (SQLite allows 999 parameters in old versions).
+queryChunk = 500
+
 # ==============================================================================
 # ConceptNet
 # ==============================================================================
@@ -54,8 +53,9 @@ class ConceptNet:
     """
     The neighbours of words in the ConceptNet database: the words reached
     from a word along the configured relations, in both directions, within
-    syngen.conceptnet.hops steps, in the first configured language, without
-    concepts of a blacklisted sense. Looked up once per word.
+    syngen.conceptnet.hops steps, in the first configured language. Concepts
+    of a blacklisted sense are neither returned nor walked through. Looked up
+    once per word.
     """
 
     def __init__(self, path : str) -> None:
@@ -73,89 +73,66 @@ class ConceptNet:
     def close(self) -> None:
         self.connection.close()
 
-    def concepts(self, word : str, language : str | None = None) -> list[int]:
-        """The concepts spelled `word` (in `language`), without blacklisted senses."""
-        query = "SELECT id, sense FROM concepts WHERE word = ?"
-        parameters = [word]
-        if language is not None:
-            query += " AND language = ?"
-            parameters.append(language)
-        return [i for i, sense in self.connection.execute(query, parameters)
+    def concepts(self, word : str) -> list[int]:
+        """The concepts spelled `word` in the first language, without blacklisted senses."""
+        return [i for i, sense in self.connection.execute(
+            "SELECT id, sense FROM concepts WHERE word = ? AND language = ?", (word, self.language))
             if sense.lower() not in self.blacklisted]
 
     def contains(self, word : str) -> bool:
         """Whether the word is a concept of the first language."""
         if word not in self.known:
-            self.known[word] = len(self.concepts(word, self.language)) > 0
+            self.known[word] = len(self.concepts(word)) > 0
         return self.known[word]
 
     def neighbours(self, word : str) -> list[str]:
         """
         The words reached from `word` within syngen.conceptnet.hops steps
-        (without `word` itself), in lower case.
+        (without `word` itself), in lower case and alphabetical order.
         """
         if word in self.cache:
             return self.cache[word]
 
-        reached  = set(self.concepts(word, self.language))
+        reached  = set(self.concepts(word))
         frontier = set(reached)
+        words    = set()
         for _ in range(conceptnetConfig.hops):
             if len(frontier) == 0:
                 break
             found = set()
-            for chunk in chunks(list(frontier), 500):
+            for chunk in chunks(list(frontier), queryChunk):
                 marks = ",".join("?" * len(chunk))
                 found.update(i for (i,) in self.connection.execute(
                     f"SELECT target FROM edges WHERE source IN ({marks})", chunk))
                 found.update(i for (i,) in self.connection.execute(
                     f"SELECT source FROM edges WHERE target IN ({marks})", chunk))
-            frontier = found - reached
+            # Only concepts of an allowed sense are kept and walked on.
+            allowed = set()
+            for chunk in chunks(list(found - reached), queryChunk):
+                marks = ",".join("?" * len(chunk))
+                for i, neighbour, language, sense in self.connection.execute(
+                        f"SELECT id, word, language, sense FROM concepts WHERE id IN ({marks})", chunk):
+                    if sense.lower() not in self.blacklisted:
+                        allowed.add(i)
+                        if language == self.language:
+                            words.add(neighbour)
+            frontier = allowed
             reached |= found
-
-        words = set()
-        for chunk in chunks(list(reached), 500):
-            marks = ",".join("?" * len(chunk))
-            for neighbour, language, sense in self.connection.execute(
-                    f"SELECT word, language, sense FROM concepts WHERE id IN ({marks})", chunk):
-                if language == self.language and sense.lower() not in self.blacklisted:
-                    words.add(neighbour)
         words.discard(word)
         self.cache[word] = sorted(words)
         return self.cache[word]
 
-def chunks(values : list, size : int):
-    """The values in lists of at most `size`."""
-    for start in range(0, len(values), size):
-        yield values[start:start + size]
-
 # ==============================================================================
-# The terms whose words are replaced, and their spans.
+# The spans of the terms whose words are replaced.
 # ==============================================================================
 
-def seedTerms(previous : pd.DataFrame, labels : dict, concepts : list) -> dict:
-    """
-    Per concept the terms whose words are replaced: its label (if "label" is
-    a seed source) and its synonyms of the other seed sources (not those equal
-    to the label), each once (lexicalKey()).
-    """
-    sources = set(conceptnetConfig.seed_sources)
-    usable  = previous[previous[sourceColumn].isin(sources) & ~previous[asLabelColumn]]
-    byConcept = usable.groupby(idColumn, sort = False)[synonymColumn].agg(list).to_dict()
-    seeds = {}
-    for hpoID in concepts:
-        terms = ([labels[hpoID]] if "label" in sources else []) + byConcept.get(hpoID, [])
-        unique = {}
-        for term in terms:
-            unique.setdefault(lexicalKey(term), term)
-        seeds[hpoID] = [term for key, term in unique.items() if key != ""]
-    return seeds
-
-def spansOf(terms : list, conceptnet : ConceptNet) -> dict:
+def termSpans(terms : list, conceptnet : ConceptNet) -> dict:
     """
     Per term its spans (start, end, text in lower case): the runs of at most
     syngen.conceptnet.max_span tokens that start and end with a content word
     and are a ConceptNet concept, e.g. "short", "stature" and "short stature"
-    in "Short stature".
+    in "Short stature". The tokens and parts of speech are those of the
+    normalizer's spaCy model.
     """
     nlp = normalizer().nlp
     spans = {}
@@ -181,24 +158,22 @@ def spansOf(terms : list, conceptnet : ConceptNet) -> dict:
 
 def filterNeighbours(questions : list, information : dict, modelID : str) -> dict:
     """
-    Asks the LLM per (concept, span, term) which neighbours can replace the
-    span in the concept, syngen.conceptnet.filter_chunk neighbours per
-    prompt, with syngen.conceptnet.filter_temperature. Returns the kept
-    neighbours per (concept, span); a neighbour the answer does not name, or
-    of an answer without a list, is dropped.
+    Asks the LLM per (concept, span, term, neighbours) which neighbours can
+    replace the span in the concept, syngen.conceptnet.filter_chunk
+    neighbours per prompt, with syngen.conceptnet.filter_temperature. Returns
+    the kept neighbours per (concept, span); a neighbour the answer does not
+    name, or of an answer without a list, is dropped.
     """
     from model import Model
-
-    logging.getLogger("vllm").setLevel(logging.ERROR)
 
     prompts = []
     for hpoID, span, term, neighbours in questions:
         info = information[hpoID]
-        details = f"\n* Definition: {quote(info['definition'])}" if info["definition"] else ""
         for chunk in chunks(neighbours, conceptnetConfig.filter_chunk):
             prompts.append(((hpoID, span), chunk, {
                 "hpo_label"   : quote(info["label"]),
-                "hpo_details" : details,
+                "hpo_details" : promptDetails(info, definition = bool(info["definition"]),
+                    comment = False, structure = False),
                 "term"        : quote(term),
                 "token"       : quote(span),
                 "candidates"  : "\n".join(f"* {neighbour}" for neighbour in chunk)
@@ -210,11 +185,13 @@ def filterNeighbours(questions : list, information : dict, modelID : str) -> dic
         return kept
 
     # The filter decides, so it samples (almost) greedily.
-    configuration = json.loads(json.dumps(configurationFile))
+    configuration = configurationCopy()
     configuration["llm"]["temperature"] = conceptnetConfig.filter_temperature
     modelIndex = configuration["llm"]["model_id"].index(modelID)
 
-    with Model(configuration, modelIndex) as model:
+    with l.step(f"Setting up the LLM ({modelNameOf(modelID)})"):
+        model = Model(configuration, modelIndex)
+    with model:
         model.setPostfix(f"{generationStr}_{stagesStr(conceptnetStage)}_filter")
         model.addPromptsFromFile(filterPromptIndex, [values for _, _, values in prompts])
         model.generate()
@@ -233,42 +210,60 @@ def filterNeighbours(questions : list, information : dict, modelID : str) -> dic
                     hallucinated += 1
         model.logPrompts()
 
-    l.log(f"Filter: {invalid} of {len(prompts)} answers without a list, {hallucinated} " \
-        f"kept words that were no candidate, {sum(len(v) for v in kept.values())} kept.")
+    if invalid > 0:
+        l.warning(f"Filter: {invalid} of {len(prompts)} answers contain no list; their " \
+            "neighbours are dropped.")
+    l.log(f"Filter: {sum(len(v) for v in kept.values())} neighbours kept, {hallucinated} " \
+        "kept words were no candidate.")
     return kept
 
 # ==============================================================================
 # Recombination: new terms with up to max_substitutions replaced spans.
 # ==============================================================================
 
+def substitute(term : str, replacements : tuple, choice : tuple) -> tuple[str, str]:
+    """
+    The term with the spans (start, end, text, neighbours) of `replacements`,
+    which do not overlap and are in the order of the term, replaced by the
+    words of `choice`, and how it was made, e.g. ("Small height", "short ->
+    small; stature -> height").
+    """
+    new, position = "", 0
+    for (start, end, _, _), neighbour in zip(replacements, choice):
+        # ConceptNet's words are in lower case; a replaced word keeps the
+        # capital letter of the original.
+        if term[start].isupper() and neighbour[:1].islower():
+            neighbour = neighbour[0].upper() + neighbour[1:]
+        new += term[position:start] + neighbour
+        position = end
+    new += term[position:]
+    return new, "; ".join(f"{r[2]} -> {n}" for r, n in zip(replacements, choice))
+
 def recombine(term : str, replacements : list) -> list[tuple[str, str]]:
     """
-    The new terms of a term and how they were made: every replacement of one
-    span, then of two non-overlapping spans, and so on up to
-    syngen.conceptnet.max_substitutions, at most
+    The new terms of a term and how they were made: the replacements of one
+    span, taken from the spans in turn (so that the cap does not leave only
+    the first span replaced), then of two non-overlapping spans, and so on up
+    to syngen.conceptnet.max_substitutions, at most
     syngen.conceptnet.max_terms_per_seed. `replacements` holds per span
     (start, end, text, neighbours).
     """
     results = []
+    perSpan = [[((r,), (n,)) for n in r[3]] for r in replacements]
+    singles = (s for s in itertools.chain.from_iterable(itertools.zip_longest(*perSpan)) if s is not None)
     for count in range(1, conceptnetConfig.max_substitutions + 1):
-        for combination in itertools.combinations(replacements, count):
-            ordered = sorted(combination, key = lambda r: r[0])
-            if any(a[1] > b[0] for a, b in zip(ordered, ordered[1:])):
-                continue
-            for choice in itertools.product(*[r[3] for r in ordered]):
-                new, position = "", 0
-                for (start, end, _, _), neighbour in zip(ordered, choice):
-                    # ConceptNet's words are in lower case; a replaced word
-                    # keeps the capital letter of the original.
-                    if term[start].isupper() and neighbour[:1].islower():
-                        neighbour = neighbour[0].upper() + neighbour[1:]
-                    new += term[position:start] + neighbour
-                    position = end
-                new += term[position:]
-                how = "; ".join(f"{r[2]} -> {n}" for r, n in zip(ordered, choice))
-                results.append((new, how))
-                if len(results) >= conceptnetConfig.max_terms_per_seed:
-                    return results
+        if count == 1:
+            options = singles
+        else:
+            options = ((ordered, choice)
+                for combination in itertools.combinations(replacements, count)
+                for ordered in [tuple(sorted(combination, key = lambda r: r[0]))]
+                if all(a[1] <= b[0] for a, b in zip(ordered, ordered[1:]))
+                for choice in itertools.product(*[r[3] for r in ordered]))
+        for ordered, choice in options:
+            results.append(substitute(term, ordered, choice))
+            if len(results) >= conceptnetConfig.max_terms_per_seed:
+                return results
     return results
 
 # ==============================================================================
@@ -286,7 +281,8 @@ def runModel(modelID : str) -> None:
     information = conceptInformation(readTask())
     labels      = {hpoID : info["label"] for hpoID, info in information.items()}
     concepts    = [hpoID for hpoID in taskConcepts() if hpoID in labels]
-    seeds       = seedTerms(previous, labels, concepts)
+    seeds       = seedTerms(previous, labels, concepts, conceptnetConfig.seed_sources,
+        withLabel = "label" in conceptnetConfig.seed_sources)
     terms       = list(dict.fromkeys(term for t in seeds.values() for term in t))
     l.log(f"{len(terms)} terms of {len(seeds)} concepts, seed sources " \
         f"{applyFormat(conceptnetConfig.seed_sources)}.")
@@ -294,7 +290,7 @@ def runModel(modelID : str) -> None:
     conceptnet = ConceptNet(conceptnetConfig.database)
     try:
         with l.step("Finding the spans and their neighbours"):
-            spans = spansOf(terms, conceptnet)
+            spans = termSpans(terms, conceptnet)
             neighbours = {text : conceptnet.neighbours(text)
                 for found in spans.values() for _, _, text in found}
     finally:
@@ -302,7 +298,8 @@ def runModel(modelID : str) -> None:
     l.log(f"{sum(len(s) for s in spans.values())} spans, {len(neighbours)} distinct; " \
         f"{sum(len(n) for n in neighbours.values())} neighbours.")
 
-    # Per concept and span: the neighbours that may replace it.
+    # Per concept and span: the first term with it (named in the filter
+    # prompt) and the neighbours that may replace it.
     allowed = {}
     for hpoID, conceptTerms in seeds.items():
         for term in conceptTerms:
@@ -334,37 +331,18 @@ def runModel(modelID : str) -> None:
     with l.step("Ranking the new terms"):
         ranked = rankCandidates(candidates, previous, labels,
             conceptnetConfig.min_similarity, conceptnetConfig.max_candidates)
-    ranked[modelColumn] = modelName
-    ranked = markAsLabel(ranked, labels)
-
-    synonyms = pd.concat([previous, ranked], ignore_index = True)[synonymFileColumns]
-    writeHugeCSV(synonyms, outputFileStage(conceptnetStage, modelName))
-    l.log(f"{len(ranked.index)} synonyms from ConceptNet, {len(synonyms.index)} in total.")
+    writeStage(conceptnetStage, modelName, previous, ranked, labels)
 
 def main() -> None:
     """
     Runs the ConceptNet stage of the experiment for every model.
     """
-    l.log(f"Command: python3 {shlex.join(sys.argv)}")
-
-    if experimentIndex is None:
-        sys.exit("Give the index of the experiment.")
+    startRun()
     if conceptnetStage not in experimentStages:
         l.log(f"Experiment {experimentIndex} has no ConceptNet stage.")
         return
 
-    failed = []
-    for modelID in modelIDs:
-        try:
-            with l.step(f"ConceptNet stage ({modelNameOf(modelID)})"):
-                runModel(modelID)
-        except (Exception, SystemExit):
-            l.exception(f"The ConceptNet stage of {quote(modelID)} failed.", cmdline = False)
-            failed.append(modelID)
-
-    if len(failed) > 0:
-        l.error(f"{len(failed)} of {len(modelIDs)} model(s) failed: {applyFormat(failed)}.")
-        sys.exit(1)
+    runForModels("Building synonyms with ConceptNet", runModel)
 
 
 # vLLM starts its workers with "spawn", which imports this script again: the

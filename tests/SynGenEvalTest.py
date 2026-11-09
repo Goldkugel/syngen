@@ -28,6 +28,10 @@ generated = pd.DataFrame({
     goldSimilarityColumn : [1.0, 1.0, 0.95, np.nan],
 })
 
+# As readEmbedded() adds it.
+gold[lexicalKeyColumn]      = gold[synonymColumn].map(lexicalKey)
+generated[lexicalKeyColumn] = generated[synonymColumn].map(lexicalKey)
+
 def testLexicalCounts():
     scored = generated[generated[idColumn].isin(["HP:1", "HP:2"])]
     counts = conceptCounts(scored, gold, ["HP:1", "HP:2"], lexicalMatch, ["llm", "pubmed"])
@@ -66,8 +70,18 @@ def testWordsCovered():
     assert math.isclose(words["words_jaccard"], (1 + 1 / 3) / 2)
     assert math.isclose(words["new_words_covered"], (1 + 0.5) / 2)
 
+def testOtherMatches():
+    other = pd.DataFrame({idColumn : ["HP:1", "HP:1"], synonymColumn : ["Dwarfism", "Tiny"],
+        sourceColumn : ["related", "exact, narrow"], normalizedColumn : ["dwarfism", "tiny"]})
+    labels = pd.DataFrame({idColumn : ["HP:2"], normalizedColumn : ["macrocephaly"]})
+    found = pd.DataFrame({idColumn : ["HP:1"] * 4,
+        normalizedColumn : ["dwarfism", "tiny", "big head", "macrocephaly"]})
+    counts = otherMatches(found, other, gold, labels)
+    assert counts == {"hpo_related" : 1, "hpo_broad" : 0, "hpo_narrow" : 0, "hpo_excluded" : 1,
+        "other_concept" : 2}
+
 def testBootstrapContainsEstimate():
     counts = pd.DataFrame({"gold" : [2, 1, 3], "gold_matched" : [1, 0, 3],
         "generated" : [2, 1, 4], "generated_matched" : [1, 0, 3]})
-    intervals = bootstrap(counts, 200)
+    intervals = bootstrap(counts, 200, 0)
     assert intervals["recall_low"] <= 4 / 6 <= intervals["recall_high"]

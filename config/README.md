@@ -11,7 +11,9 @@
 | `embedder` | the `embedder` package | The embedding model of the similarities (SapBERT; only the first of `model_id` is used) with its pinned revision, pooling, device and cache |
 | `normalizer` | the `normalizer` package | The normalisation of the normalised match and of the words covered |
 
-The settings of the package sections are described in the READMEs of the packages. A key a schema does not know is refused, so typos are found when a run starts.
+The settings of the package sections are described in the READMEs of the packages. A key a schema does not know is refused, so typos are found when a run starts; so are unknown command-line options, more than two arguments and a model ID that is not in `llm.model_id`.
+
+Some settings are constants in the code, as they rarely need a change: the earliest publication date of the PubMed search (`minDate`), the PMIDs per efetch request (`fetchBatchSize`), the most characters between two NER entities joined into one candidate (5, `spansOf()`), the decimals of the embedding key (`embeddingKeyDecimals`) and the Slurm resources (`#SBATCH` lines of `generate.sh`).
 
 ## `syngen`
 
@@ -35,6 +37,7 @@ The settings of the package sections are described in the READMEs of the package
 | `pubmed.cache_file` | `str` | `"./data/cache/pubmed/pubmed.sqlite"` | The cache of searches, articles and NER spans |
 | `pubmed.ner_model` | `str` | `"d4data/biomedical-ner-all"` | The NER model finding the candidates |
 | `pubmed.ner_batch_size` | `int` | `64` | Sentences per NER batch |
+| `pubmed.entity_groups` | list | `[]` | The entity groups of the NER model that are candidates (e.g. `Sign_symptom`, `Disease_disorder`); all if empty. The cache keeps the entities of all groups, so changing it needs no new tagging |
 | `pubmed.sentences` | `"seed"` or `"all"` | `"seed"` | Only the sentences mentioning the searched term, or all |
 | `pubmed.min_length` | `int` | `3` | Shorter candidates are dropped |
 | `pubmed.min_similarity`, `pubmed.max_candidates` | `float`, `int` | `0.85`, `10` | Per concept: the candidates at least this similar to the label, the most similar `max_candidates` |
@@ -56,6 +59,7 @@ The settings of the package sections are described in the READMEs of the package
 | `evaluation.embedding_match` | `float` | `1.0` | The cosine similarity of the embedding match; the accuracy of the embedding match needs 1 |
 | `evaluation.threshold_lower`, `_upper`, `_step` | `float` | `0.5`, `1.0`, `0.01` | The thresholds of the similarity curve |
 | `evaluation.bootstrap_samples` | `int` | `1000` | Bootstrap samples (over concepts) of the 95% intervals |
+| `evaluation.bootstrap_seed` | `int` | `0` | Seed of the bootstrap samples |
 
 ### Settings of an experiment
 

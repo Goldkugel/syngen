@@ -41,6 +41,9 @@ syngen:
     cache_file: "./data/cache/pubmed/pubmed.sqlite"
     ner_model: "d4data/biomedical-ner-all"
     ner_batch_size: 64
+    # The entity groups of the NER model that are candidates, e.g.
+    # "Sign_symptom" or "Disease_disorder"; all if empty.
+    entity_groups: []
     # "seed": only sentences mentioning the searched term; "all": every one.
     sentences: "seed"
     min_length: 3
@@ -86,6 +89,7 @@ syngen:
     threshold_upper: 1.0
     threshold_step: 0.01
     bootstrap_samples: 1000
+    bootstrap_seed: 0
 adapter:
   hpo:
     input_folder: "./data/input/hpo/"

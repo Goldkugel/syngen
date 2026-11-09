@@ -23,6 +23,32 @@ def testPlausible():
     assert not plausible("Ki67, ZEB")
     assert not plausible("ICA o")
 
+def testWordKey():
+    assert wordKey("Ear") in wordKey("Pain of the ear.")
+    assert wordKey("ear") not in wordKey("Every year")
+
+def testSpansOfEntityGroups(monkeypatch):
+    entities = [[0, 5, "Severity"], [6, 13, "Sign_symptom"], [20, 25, "Sign_symptom"]]
+    assert spansOf(entities) == [(0, 5), (6, 13), (20, 25), (0, 13)]
+    monkeypatch.setattr(SynGenPubMed.pubmedConfig, "entity_groups", ["Sign_symptom"])
+    assert spansOf(entities) == [(6, 13), (20, 25)]
+
+def testFailedSearchIsWarnedAndRetried(tmp_path, monkeypatch):
+    cache = PubMedCache(str(tmp_path / "cache.sqlite"))
+    def search(self, term):
+        if term == "bad":
+            raise EUtilitiesError("esearch failed: HTTP 400.")
+        return ["1"], 1
+    monkeypatch.setattr(EUtilities, "search", search)
+    monkeypatch.setattr(EUtilities, "fetch", lambda self, pmids: {p : ("T", "") for p in pmids})
+    fetchArticles(cache, ["good", "bad"])
+    assert cache.searched(["good", "bad"]) == {"good" : (["1"], 1), "bad" : ([], -1)}
+    calls = []
+    monkeypatch.setattr(EUtilities, "search", lambda self, term: calls.append(term) or ([], 0))
+    fetchArticles(cache, ["good", "bad"])
+    assert calls == ["bad"]
+    cache.close()
+
 def testFetchParsesTitlesAndAbstracts(monkeypatch):
     answer = """<?xml version="1.0"?>
     <PubmedArticleSet>
@@ -51,11 +77,12 @@ def testCache(tmp_path):
     cache = PubMedCache(str(tmp_path / "cache.sqlite"))
     cache.addSearch("a", ["1", "2"], 2)
     cache.addArticles({"1" : ("T", "A"), "2" : ("", "")})
-    cache.addSpans({"A sentence." : [[0, 1]]}, "ner")
-    assert cache.searched(["a", "b"]) == {"a" : ["1", "2"]}
+    cache.addSearch("c", [], SynGenPubMed.failedSearch)
+    cache.addEntities({"A sentence." : [[0, 1, "Sign_symptom"]]}, "ner")
+    assert cache.searched(["a", "b", "c"]) == {"a" : (["1", "2"], 2), "c" : ([], -1)}
     assert cache.articles(["1", "3"]) == {"1" : ("T", "A")}
-    assert cache.spans(["A sentence.", "Other."], "ner") == {"A sentence." : [[0, 1]]}
-    assert cache.spans(["A sentence."], "other model") == {}
+    assert cache.entities(["A sentence.", "Other."], "ner") == {"A sentence." : [[0, 1, "Sign_symptom"]]}
+    assert cache.entities(["A sentence."], "other model") == {}
     cache.close()
 
 def testFindCandidates(tmp_path, monkeypatch):
@@ -65,7 +92,7 @@ def testFindCandidates(tmp_path, monkeypatch):
     cache.addArticles({"1" : ("", sentence + " Unrelated growth hormone sentence.")})
     start = sentence.index("small")
     # Two adjacent entities are joined as well.
-    cache.addSpans({sentence : [[start, start + 5], [start + 6, start + 13], [start, start + 13]]},
+    cache.addEntities({sentence : [[start, start + 5, "A"], [start + 6, start + 13, "B"]]},
         syngenConfig.pubmed.ner_model)
     candidates = findCandidates(cache, {"HP:1" : ["Short stature"]})
     assert sorted(candidates[synonymColumn]) == ["small", "small stature", "stature"]

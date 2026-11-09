@@ -26,7 +26,6 @@ words of the label). Only concepts with gold synonyms are scored.
     python3 ./src/SynGenEval.py <index> [<model>]
 """
 
-import shlex
 import sys
 
 import numpy  as np
@@ -51,22 +50,38 @@ matchTypes      = [lexicalMatch, normalizedMatch, embeddingMatch]
 aloneMode       = "alone"
 cumulativeMode  = "cumulative"
 
-# The similarity of two vectors equal up to rounding.
-similarityTolerance = 1e-6
+# The column of the key a synonym is compared by in a match ("" never
+# matches); the embedding match compares similarities, its key is only used by
+# accuracy().
+lexicalKeyColumn = "lexical_key"
+matchKeyColumns  = {
+    lexicalMatch    : lexicalKeyColumn,
+    normalizedMatch : normalizedColumn,
+    embeddingMatch  : embeddingKeyColumn
+}
+
+# The generated synonyms HPO lists for their concept, but not as gold
+# synonyms, counted by class (see otherMatches()).
+otherClasses = ["related", "broad", "narrow", "excluded"]
 
 # ==============================================================================
 # Matching
 # ==============================================================================
 
-def keysOf(texts : pd.Series, normalized : pd.Series, embeddingKeys : pd.Series, match : str) -> list:
+def readEmbedded(file : str) -> pd.DataFrame:
     """
-    The key a synonym is compared by in a match; "" never matches.
+    A file of SynGenEmbed.py, with the keys of the matches as text ("" for
+    none) and the lexical key added.
     """
-    if match == lexicalMatch:
-        return [lexicalKey(text) for text in texts]
-    if match == normalizedMatch:
-        return normalized.fillna("").astype(str).tolist()
-    return embeddingKeys.fillna("").astype(str).tolist()
+    exitIfFileNotExist(file)
+    data = readCSV(file)
+    data[synonymColumn] = data[synonymColumn].fillna("").astype(str)
+    for column in [normalizedColumn, embeddingKeyColumn]:
+        data[column] = data[column].fillna("").astype(str)
+    data[lexicalKeyColumn] = data[synonymColumn].map(lexicalKey)
+    if asLabelColumn in data.columns:
+        data[asLabelColumn] = data[asLabelColumn].astype(str).str.lower() == "true"
+    return data
 
 def viewStages(stage : str, mode : str) -> list:
     """The stages whose synonyms a view evaluates."""
@@ -95,16 +110,14 @@ def conceptCounts(generated : pd.DataFrame, gold : pd.DataFrame, concepts : list
         goldMatched = goldSimilarity(gold, viewSources) >= limit
         generatedMatched = generated[goldSimilarityColumn].astype(float).fillna(-np.inf).to_numpy() >= limit
     else:
-        goldKeys      = keysOf(gold[synonymColumn], gold[normalizedColumn], gold[embeddingKeyColumn], match)
-        generatedKeys = keysOf(generated[synonymColumn], generated[normalizedColumn],
-            generated[embeddingKeyColumn], match)
-        goldSets      = pd.Series(goldKeys).groupby(gold[idColumn].to_numpy()).agg(set).to_dict()
-        generatedSets = pd.Series(generatedKeys).groupby(generated[idColumn].to_numpy()).agg(set).to_dict() \
-            if len(generated.index) > 0 else {}
-        goldMatched = np.array([key != "" and key in generatedSets.get(hpoID, set())
-            for hpoID, key in zip(gold[idColumn], goldKeys)], dtype = bool)
-        generatedMatched = np.array([key != "" and key in goldSets.get(hpoID, set())
-            for hpoID, key in zip(generated[idColumn], generatedKeys)], dtype = bool)
+        # A synonym matches if the (concept, key) pair is on the other side.
+        column        = matchKeyColumns[match]
+        goldPairs     = set(zip(gold[idColumn], gold[column]))
+        generatedPairs = set(zip(generated[idColumn], generated[column]))
+        goldMatched = np.array([key != "" and (hpoID, key) in generatedPairs
+            for hpoID, key in zip(gold[idColumn], gold[column])], dtype = bool)
+        generatedMatched = np.array([key != "" and (hpoID, key) in goldPairs
+            for hpoID, key in zip(generated[idColumn], generated[column])], dtype = bool)
 
     counts = pd.DataFrame(index = pd.Index(concepts, name = idColumn))
     counts["gold"]              = gold.groupby(idColumn).size()
@@ -119,12 +132,16 @@ def conceptCounts(generated : pd.DataFrame, gold : pd.DataFrame, concepts : list
 
 def scores(counts : pd.DataFrame) -> dict:
     """
-    Micro and macro precision, recall and F1 of the per-concept counts.
+    Micro and macro precision, recall and F1 of the per-concept counts. The
+    macro precision is the mean over the concepts with generated synonyms;
+    for the macro F1 a concept without them has precision 0.
     """
-    def divide(a, b):
+    def divide(a, b) -> float:
         return a / b if b > 0 else float("nan")
-    def f1(p, r):
-        return 2 * p * r / (p + r) if p + r > 0 else (0.0 if p == p and r == r else float("nan"))
+    def f1(p, r) -> float:
+        if np.isnan(p) or np.isnan(r):
+            return float("nan")
+        return 2 * p * r / (p + r) if p + r > 0 else 0.0
 
     precision = divide(counts["generated_matched"].sum(), counts["generated"].sum())
     recall    = divide(counts["gold_matched"].sum(), counts["gold"].sum())
@@ -144,10 +161,11 @@ def scores(counts : pd.DataFrame) -> dict:
         "macro_f1"        : float(np.mean(conceptF1)) if len(conceptF1) > 0 else float("nan")
     }
 
-def bootstrap(counts : pd.DataFrame, samples : int, seed : int = 0) -> dict:
+def bootstrap(counts : pd.DataFrame, samples : int, seed : int) -> dict:
     """
     The 95% intervals of the micro precision, recall and F1, from samples of
-    the concepts drawn with replacement.
+    the concepts drawn with replacement (100 samples at a time, to bound the
+    memory).
     """
     generator = np.random.default_rng(seed)
     values = counts[["gold", "gold_matched", "generated", "generated_matched"]].to_numpy()
@@ -179,9 +197,8 @@ def accuracy(generated : pd.DataFrame, gold : pd.DataFrame, match : str) -> floa
     """
     if match == embeddingMatch and evaluationConfig.embedding_match < 1 - similarityTolerance:
         return float("nan")
-    goldKeys = set(keysOf(gold[synonymColumn], gold[normalizedColumn], gold[embeddingKeyColumn], match)) - {""}
-    generatedKeys = set(keysOf(generated[synonymColumn], generated[normalizedColumn],
-        generated[embeddingKeyColumn], match))
+    goldKeys      = set(gold[matchKeyColumns[match]]) - {""}
+    generatedKeys = set(generated[matchKeyColumns[match]])
     return len(goldKeys & generatedKeys) / len(goldKeys) if len(goldKeys) > 0 else float("nan")
 
 def wordsCovered(generated : pd.DataFrame, gold : pd.DataFrame, labelWords : dict,
@@ -192,7 +209,7 @@ def wordsCovered(generated : pd.DataFrame, gold : pd.DataFrame, labelWords : dic
     of gold words generated; also without the words of the label.
     """
     def words(frame : pd.DataFrame) -> dict:
-        tokens = frame[normalizedColumn].fillna("").astype(str).str.split()
+        tokens = frame[normalizedColumn].str.split()
         return tokens.groupby(frame[idColumn].to_numpy()).agg(
             lambda lists: set(t for ts in lists for t in ts)).to_dict() if len(frame.index) > 0 else {}
 
@@ -213,24 +230,26 @@ def otherMatches(generated : pd.DataFrame, other : pd.DataFrame, gold : pd.DataF
         labels : pd.DataFrame) -> dict:
     """
     How many generated synonyms (normalised) are not gold synonyms of their
-    concept but synonyms HPO lists for it with another class (or excludes
-    from the gold standard), and how many are a gold synonym or the label of
-    another concept.
+    concept but synonyms HPO lists for it otherwise ("hpo_<class>" of
+    otherClasses: related, broad or narrow, or "excluded" for an exact one
+    left out of the gold standard), and how many are a gold synonym or the
+    label of another concept ("other_concept").
     """
-    keys = list(zip(generated[idColumn], generated[normalizedColumn].fillna("").astype(str)))
-    goldOwn = set(zip(gold[idColumn], gold[normalizedColumn].fillna("").astype(str)))
+    keys    = list(zip(generated[idColumn], generated[normalizedColumn]))
+    goldOwn = set(zip(gold[idColumn], gold[normalizedColumn]))
 
-    ret = {}
+    ret = {f"hpo_{name}" : 0 for name in otherClasses}
     otherOwn = {}
     for hpoID, key, classes in zip(other[idColumn], other[normalizedColumn], other[sourceColumn]):
-        otherOwn.setdefault((hpoID, key), classes.split(", ")[0] or "other")
+        classes = classes.split(", ")
+        name = "excluded" if exactSynonymClass in classes else (classes[0] or "related")
+        otherOwn.setdefault((hpoID, key), name if name in otherClasses else "related")
     for key in keys:
         if key[1] != "" and key not in goldOwn and key in otherOwn:
-            name = f"hpo_{otherOwn[key]}"
-            ret[name] = ret.get(name, 0) + 1
+            ret[f"hpo_{otherOwn[key]}"] += 1
 
     byKey = {}
-    for hpoID, key in list(zip(gold[idColumn], gold[normalizedColumn].fillna("").astype(str))) + \
+    for hpoID, key in list(zip(gold[idColumn], gold[normalizedColumn])) + \
             list(zip(labels[idColumn], labels[normalizedColumn])):
         byKey.setdefault(key, set()).add(hpoID)
     ret["other_concept"] = sum(1 for hpoID, key in keys
@@ -241,14 +260,24 @@ def otherMatches(generated : pd.DataFrame, other : pd.DataFrame, gold : pd.DataF
 # Plots
 # ==============================================================================
 
-def plotSummary(summary : pd.DataFrame, file : str) -> None:
-    """Precision, recall and F1 (micro) of every view and match."""
+def pyplot():
+    """matplotlib's pyplot, drawing to files only (no display on the cluster)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    return plt
 
+def saveFigure(figure, file : str) -> None:
+    """Writes a figure to a file, creating its folder if needed, and closes it."""
+    figure.tight_layout()
+    os.makedirs(os.path.dirname(file), exist_ok = True)
+    figure.savefig(file, dpi = 150)
+    pyplot().close(figure)
+
+def plotSummary(summary : pd.DataFrame, file : str) -> None:
+    """Precision, recall and F1 (micro) of every view and match."""
     views = summary["view"].drop_duplicates().tolist()
-    figure, axes = plt.subplots(1, len(matchTypes), figsize = (5 * len(matchTypes), 4), sharey = True)
+    figure, axes = pyplot().subplots(1, len(matchTypes), figsize = (5 * len(matchTypes), 4), sharey = True)
     for axis, match in zip(np.atleast_1d(axes), matchTypes):
         rows = summary[summary["match"] == match].set_index("view").reindex(views)
         x = np.arange(len(views))
@@ -258,18 +287,11 @@ def plotSummary(summary : pd.DataFrame, file : str) -> None:
         axis.set_title(match)
         axis.set_ylim(0, 1)
     np.atleast_1d(axes)[0].legend()
-    figure.tight_layout()
-    os.makedirs(os.path.dirname(file), exist_ok = True)
-    figure.savefig(file, dpi = 150)
-    plt.close(figure)
+    saveFigure(figure, file)
 
 def plotCurve(curve : pd.DataFrame, x : str, file : str, xlabel : str) -> None:
     """Precision, recall and F1 (micro) of every view against x."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    figure, axes = plt.subplots(1, 3, figsize = (15, 4), sharey = True)
+    figure, axes = pyplot().subplots(1, 3, figsize = (15, 4), sharey = True)
     for axis, metric in zip(axes, ["precision", "recall", "f1"]):
         for view, rows in curve.groupby("view", sort = False):
             axis.plot(rows[x], rows[metric], label = view)
@@ -277,26 +299,22 @@ def plotCurve(curve : pd.DataFrame, x : str, file : str, xlabel : str) -> None:
         axis.set_xlabel(xlabel)
         axis.set_ylim(0, 1)
     axes[0].legend()
-    figure.tight_layout()
-    os.makedirs(os.path.dirname(file), exist_ok = True)
-    figure.savefig(file, dpi = 150)
-    plt.close(figure)
+    saveFigure(figure, file)
 
 # ==============================================================================
 # The evaluation of one model's run.
 # ==============================================================================
 
-def evaluateModel(modelName : str) -> pd.DataFrame:
+def evaluateModel(modelID : str) -> pd.DataFrame:
     """
     Evaluates the synonyms of one model's run and writes the summary, the
     curves and their plots.
     """
-    exitIfFileNotExist(outputFileEmbedded(modelName))
-    generatedAll = readCSV(outputFileEmbedded(modelName))
-    generatedAll[synonymColumn] = generatedAll[synonymColumn].fillna("").astype(str)
-    generatedAll[asLabelColumn] = generatedAll[asLabelColumn].astype(str).str.lower() == "true"
-    gold = readCSV(outputFileEmbeddedGold(modelName))
-    gold[synonymColumn] = gold[synonymColumn].fillna("").astype(str)
+    modelName = modelNameOf(modelID)
+    l.printHeader(f"Evaluating the Synonyms ({modelName})")
+
+    generatedAll = readEmbedded(outputFileEmbedded(modelName))
+    gold         = readEmbedded(outputFileEmbeddedGold(modelName))
 
     data     = readTask()
     concepts = sorted(gold[idColumn].unique())
@@ -337,7 +355,8 @@ def evaluateModel(modelName : str) -> pd.DataFrame:
                     "gold_matched" : int(counts["gold_matched"].sum()),
                     "generated_matched" : int(counts["generated_matched"].sum())}
                 row |= scores(counts)
-                row |= bootstrap(counts, evaluationConfig.bootstrap_samples)
+                row |= bootstrap(counts, evaluationConfig.bootstrap_samples,
+                    evaluationConfig.bootstrap_seed)
                 row["accuracy"] = accuracy(ofView, gold, match)
                 row |= words
                 row |= others
@@ -350,7 +369,8 @@ def evaluateModel(modelName : str) -> pd.DataFrame:
                 counts = conceptCounts(scored, gold, concepts, embeddingMatch, sources, threshold)
                 thresholdCurve.append({"view" : view, "threshold" : threshold} | scores(counts))
 
-            # The LLM synonyms generated in at least k rounds.
+            # The LLM synonyms generated in at least k rounds (normalised
+            # match).
             if stage == llmStage and mode == aloneMode:
                 for k in range(1, rounds + 1):
                     subset = scored[scored[roundsColumn].astype(float) >= k]
@@ -381,7 +401,8 @@ def evaluateModel(modelName : str) -> pd.DataFrame:
     for _, row in final.iterrows():
         l.log(f"  {row['match']}: precision {row['precision']:.3f}, recall {row['recall']:.3f}, " \
             f"F1 {row['f1']:.3f}, accuracy {row['accuracy']:.3f}.")
-    best = thresholdCurve.loc[thresholdCurve.groupby("view")["f1"].idxmax().dropna()]
+    defined = thresholdCurve.dropna(subset = ["f1"])
+    best = defined.loc[defined.groupby("view", sort = False)["f1"].idxmax()]
     for _, row in best.iterrows():
         l.log(f"Best embedding threshold of {row['view']}: {row['threshold']} (F1 {row['f1']:.3f}).")
     return summary
@@ -390,23 +411,8 @@ def main() -> None:
     """
     Evaluates the experiment for every model.
     """
-    l.log(f"Command: python3 {shlex.join(sys.argv)}")
-    if experimentIndex is None:
-        sys.exit("Give the index of the experiment.")
-
-    l.printHeader(f"Evaluating Experiment {experimentIndex}")
-    failed = []
-    for modelID in modelIDs:
-        try:
-            with l.step(f"Evaluating ({modelNameOf(modelID)})"):
-                evaluateModel(modelNameOf(modelID))
-        except (Exception, SystemExit):
-            l.exception(f"Evaluating {quote(modelID)} failed.", cmdline = False)
-            failed.append(modelID)
-
-    if len(failed) > 0:
-        l.error(f"{len(failed)} of {len(modelIDs)} model(s) failed: {applyFormat(failed)}.")
-        sys.exit(1)
+    startRun()
+    runForModels(f"Evaluating experiment {experimentIndex}", evaluateModel)
 
 
 if __name__ == "__main__":

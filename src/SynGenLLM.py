@@ -14,8 +14,6 @@ preparation run does not load vLLM.
 
 import os
 import sys
-import shlex
-import logging
 
 import pandas as pd
 
@@ -35,23 +33,6 @@ l = Logger(config = configFile)
 
 # Index of the generation template in llm.prompt_files.
 generationPromptIndex = 0
-
-def promptDetails(information : dict, definition : bool = addDefinition,
-        comment : bool = addComment, structure : bool = addStructure) -> str:
-    """
-    The value of {hpo_details}: one line per information the experiment adds
-    (definition, comment, and parents and children for structure), each
-    starting with a line break; empty without them.
-    """
-    details = []
-    if definition:
-        details.append(f"* Definition: {quote(information['definition'])}")
-    if comment:
-        details.append(f"* Comment: {quote(information['comment'])}")
-    if structure:
-        details.append(f"* Parents: {applyFormat(information['parents'])}")
-        details.append(f"* Children: {applyFormat(information['children'])}")
-    return "".join(f"\n{line}" for line in details)
 
 def examples(fewShot : bool = fewShot) -> str:
     """
@@ -93,21 +74,24 @@ def promptValues(information : dict, examplesValue : str) -> dict:
 # stage file.
 # ==============================================================================
 
-def useSeed(model, seed : int) -> None:
+def countRounds(found : pd.DataFrame) -> pd.DataFrame:
     """
-    Makes the loaded model sample with another seed: its configuration (which
-    the answer store records, so answers of another seed are never reused)
-    and its sampling parameters, without loading the model again.
+    The synonyms of the rounds (one row per concept, round and synonym, with
+    its lexicalKey() in the column "key") as one row per concept and synonym:
+    in its most frequent spelling (on a tie the first generated), with the
+    number of rounds that generated it and the first of them.
     """
-    from vllm import SamplingParams
-
-    model.config = model.config.model_copy(update = {"seed" : seed})
-    model.sampling_params = SamplingParams(
-        temperature = model.config.temperature,
-        top_p       = model.config.top_p,
-        max_tokens  = model.config.max_tokens,
-        seed        = seed
-    )
+    keys = [idColumn, "key"]
+    spellings = found.groupby(keys + [synonymColumn], sort = False).size().reset_index(name = "count")
+    spellings = spellings.sort_values("count", ascending = False, kind = "stable") \
+        .drop_duplicates(subset = keys)
+    counted = found.groupby(keys, sort = False).agg(**{
+        roundsColumn     : ("round", "nunique"),
+        firstRoundColumn : ("round", "min")
+    }).reset_index()
+    counted = counted.merge(spellings[keys + [synonymColumn]], on = keys, how = "left")
+    counted[sourceColumn] = llmStage
+    return synonymFrame(counted.drop(columns = "key").to_dict("records"))
 
 def generateSynonyms(modelID : str) -> pd.DataFrame:
     """
@@ -118,10 +102,6 @@ def generateSynonyms(modelID : str) -> pd.DataFrame:
     """
     from model import Model
 
-    logging.getLogger("vllm").setLevel(logging.ERROR)
-
-    if modelID not in configurationFile["llm"]["model_id"]:
-        raise ValueError(f"{quote(modelID)} is not in llm.model_id.")
     modelIndex = configurationFile["llm"]["model_id"].index(modelID)
     modelName  = modelNameOf(modelID)
 
@@ -141,17 +121,17 @@ def generateSynonyms(modelID : str) -> pd.DataFrame:
         f"{applyFormat(experimentStages)}.")
     l.log(f"Generating synonyms for {len(concepts)} concepts in {rounds} rounds.")
 
-    seed = configurationFile["llm"]["seed"]
-    answers = []
-    l.log(f"Setting up the LLM ({modelName})...")
-    with Model(configFile, modelIndex) as model:
-        l.log(f"Setting up the LLM ({modelName}) completed.")
-
+    seed  = configurationFile["llm"]["seed"]
+    # The answers of all rounds, and one row per synonym of an answer.
+    answers, found = [], []
+    with l.step(f"Setting up the LLM ({modelName})"):
+        model = Model(configFile, modelIndex)
+    with model:
         for r in range(1, rounds + 1):
             with l.step(f"Round {r}/{rounds} (seed {seed + r - 1})"):
-                # Each round has its own answer store and prompt log, as the
-                # store refuses answers of another seed.
-                useSeed(model, seed + r - 1)
+                # The model stays loaded; each round has its own answer store
+                # and prompt log, as a store refuses answers of another seed.
+                model.setSeed(seed + r - 1)
                 model.setPostfix(f"{generationStr}_round{r}")
                 model.reset()
 
@@ -161,49 +141,37 @@ def generateSynonyms(modelID : str) -> pd.DataFrame:
                         f"{model.getPrompt(0, 0)}", cmdline = False)
                 model.generate()
 
-                parsed = [parseTerms(model.toJSON(index), synonymsKey) for index in range(len(values))]
-                for index, (hpoID, terms) in enumerate(zip(concepts, parsed)):
+                invalid, count = 0, 0
+                for index, hpoID in enumerate(concepts):
+                    terms = parseTerms(model.toJSON(index), synonymsKey)
                     answers.append({
-                        idColumn      : hpoID,
-                        "round"       : r,
-                        "answer"      : model.getAnswer(index, 0),
-                        "valid"       : terms is not None,
-                        synonymsKey   : json.dumps(terms or [], ensure_ascii = False)
+                        idColumn    : hpoID,
+                        "round"     : r,
+                        "answer"    : model.getAnswer(index, 0),
+                        "valid"     : terms is not None,
+                        synonymsKey : json.dumps(terms or [], ensure_ascii = False)
                     })
-                invalid = sum(terms is None for terms in parsed)
+                    invalid += terms is None
+                    # A synonym listed twice in an answer counts once.
+                    seen = set()
+                    for term in terms or []:
+                        key = lexicalKey(term)
+                        if key != "" and key not in seen:
+                            seen.add(key)
+                            found.append({idColumn : hpoID, "round" : r, synonymColumn : term, "key" : key})
+                    count += len(seen)
                 if invalid > 0:
-                    l.warning(f"Round {r}: {invalid} of {len(parsed)} answers contain no list " \
-                        "of synonyms (e.g. longer than llm.max_model_len).")
-                l.log(f"Round {r}: {sum(len(t or []) for t in parsed)} synonyms.")
+                    l.warning(f"Round {r}: {invalid} of {len(concepts)} answers contain no list " \
+                        "of synonyms (e.g. cut off at llm.max_tokens or longer than llm.max_model_len).")
+                l.log(f"Round {r}: {count} synonyms.")
                 model.logPrompts()
 
-    raw = pd.DataFrame(answers)
-    writeHugeCSV(raw, outputFileLLMRaw(modelName))
+    writeHugeCSV(pd.DataFrame(answers), outputFileLLMRaw(modelName))
 
-    # One row per concept and synonym; its most frequent spelling, and the
-    # number of rounds that generated it.
-    rows = []
-    for (hpoID, r), group in raw.groupby([idColumn, "round"], sort = False):
-        for synonym in dict.fromkeys(json.loads(group[synonymsKey].iloc[0])):
-            rows.append({idColumn : hpoID, "round" : r, synonymColumn : synonym,
-                "key" : lexicalKey(synonym)})
-    found = pd.DataFrame(rows, columns = [idColumn, "round", synonymColumn, "key"])
-    found = found[found["key"] != ""]
-
-    grouped = found.groupby([idColumn, "key"], sort = False)
-    synonyms = synonymFrame([
-        {
-            idColumn         : hpoID,
-            synonymColumn    : group[synonymColumn].value_counts().index[0],
-            sourceColumn     : llmStage,
-            modelColumn      : modelName,
-            roundsColumn     : group["round"].nunique(),
-            firstRoundColumn : group["round"].min()
-        }
-        for (hpoID, _), group in grouped
-    ])
-    labels = {hpoID : information[hpoID]["label"] for hpoID in concepts}
-    synonyms = markAsLabel(synonyms, labels)
+    found = pd.DataFrame(found, columns = [idColumn, "round", synonymColumn, "key"])
+    synonyms = countRounds(found)
+    synonyms[modelColumn] = modelName
+    synonyms = markAsLabel(synonyms, {hpoID : information[hpoID]["label"] for hpoID in concepts})
 
     l.log(f"{len(synonyms.index)} distinct synonyms of {synonyms[idColumn].nunique()} of " \
         f"{len(concepts)} concepts; {synonyms[asLabelColumn].sum()} equal their label.")
@@ -221,33 +189,14 @@ def main() -> None:
     Runs the steps: the preparation, and without an experiment index nothing
     else; otherwise the generation of the experiment with every model.
     """
-    # The log file is named after the start of the run only, so the command
-    # line is its first line.
-    l.log(f"Command: python3 {shlex.join(sys.argv)}")
+    startRun(experimentRequired = False)
 
     prepare()
     if experimentIndex is None:
         return
 
-    # A failing model does not stop the others; each is unloaded from the GPU
-    # before the next one.
-    failed = []
-    for index, modelID in enumerate(modelIDs):
-        l.log(f"Model {index + 1}/{len(modelIDs)}: {quote(modelID)}.")
-        modelName = modelNameOf(modelID)
-        try:
-            with l.step(f"Generating the synonyms ({modelName})"):
-                synonyms = generateSynonyms(modelID)
-            writeHugeCSV(synonyms, outputFileStage(llmStage, modelName))
-        except (Exception, SystemExit):
-            # The step's rows give the reason; the traceback goes to the log
-            # file only.
-            l.exception(f"Generating with {quote(modelID)} failed.", cmdline = False)
-            failed.append(modelID)
-
-    if len(failed) > 0:
-        l.error(f"{len(failed)} of {len(modelIDs)} model(s) failed: {applyFormat(failed)}.")
-        sys.exit(1)
+    runForModels("Generating the synonyms", lambda modelID: writeHugeCSV(
+        generateSynonyms(modelID), outputFileStage(llmStage, modelNameOf(modelID))))
 
 
 # vLLM starts its workers with "spawn", which imports this script again: the

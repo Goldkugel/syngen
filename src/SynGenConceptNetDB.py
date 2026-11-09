@@ -16,7 +16,6 @@ import gzip
 import json
 import os
 import re
-import shlex
 import sqlite3
 import sys
 import time
@@ -140,20 +139,24 @@ def build(dump : str, database : str) -> None:
     connection.executemany("INSERT INTO concepts VALUES (?, ?, ?, ?, ?)",
         [(i, word, language, pos, sense) for (word, language, pos, sense), i in concepts.items()])
     connection.execute("INSERT INTO settings VALUES (?)", (databaseSettings(),))
-    l.log("Building the indexes...")
-    connection.execute("CREATE INDEX concepts_word ON concepts (word, language)")
-    connection.execute("CREATE INDEX edges_target ON edges (target, relation)")
-    connection.execute("ANALYZE")
+    # The primary key of edges serves the lookups by source; these serve the
+    # lookups of a word and by target.
+    with l.step("Building the indexes"):
+        connection.execute("CREATE INDEX concepts_word ON concepts (word, language)")
+        connection.execute("CREATE INDEX edges_target ON edges (target, relation)")
+        connection.execute("ANALYZE")
+    stored = connection.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
     connection.commit()
     connection.close()
     os.replace(temporary, database)
-    l.log(f"{len(concepts)} concepts and {kept} edges of the relations " \
-        f"{applyFormat(sorted(relations.values()))} and languages {applyFormat(sorted(languages))}.")
+    l.log(f"{len(concepts)} concepts and {stored} edges ({kept - stored} duplicate assertions) " \
+        f"of the relations {applyFormat(sorted(relations.values()))} and languages " \
+        f"{applyFormat(sorted(languages))}.")
 
 
 if __name__ == "__main__":
     l = Logger(config = configFile)
-    l.log(f"Command: python3 {shlex.join(sys.argv)}")
+    startRun(experimentRequired = False)
     l.printHeader("Building the ConceptNet Database")
     with l.step("Building the ConceptNet database"):
         build(conceptnetConfig.dump, conceptnetConfig.database)

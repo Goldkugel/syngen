@@ -21,7 +21,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import sqlite3
 import sys
 import time
@@ -46,6 +45,10 @@ eUtilitiesURL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
 fetchBatchSize = 200
 # The earliest publication date of the search; esearch needs both dates.
 minDate = "1000/01/01"
+# Rows per SQL query with IN (SQLite allows 999 parameters in old versions).
+queryChunk = 500
+# The count of a search that failed; it is tried again by the next run.
+failedSearch = -1
 
 # The settings a search result depends on: a result made with others is
 # searched again.
@@ -56,15 +59,16 @@ searchSettings = json.dumps({
 }, sort_keys = True)
 
 # ==============================================================================
-# The cache: search results, articles and NER spans (SQLite).
+# The cache: search results, articles and NER entities (SQLite).
 # ==============================================================================
 
 class PubMedCache:
     """
-    The search results (PMIDs per term and search settings), the articles
-    (title and abstract per PMID; empty for a PMID PubMed did not return)
-    and the NER spans per sentence and NER model, in one SQLite file. Every
-    write is committed, so an interrupted run loses nothing.
+    The search results (PMIDs and total count per term and search settings;
+    count failedSearch for a search that failed), the articles (title and
+    abstract per PMID; empty for a PMID PubMed did not return) and the NER
+    entities per sentence and NER model, in one SQLite file. Every write is
+    committed, so an interrupted run loses nothing.
     """
 
     def __init__(self, path : str) -> None:
@@ -92,14 +96,16 @@ class PubMedCache:
         self.connection.close()
 
     def searched(self, terms : list) -> dict:
-        """The PMIDs of the terms already searched with searchSettings."""
+        """
+        The (PMIDs, total count) of the terms already searched with
+        searchSettings, failed searches included.
+        """
         found = {}
-        for start in range(0, len(terms), 500):
-            chunk = terms[start:start + 500]
+        for chunk in chunks(terms, queryChunk):
             rows = self.connection.execute(
-                f"SELECT term, pmids FROM searches WHERE settings = ? AND term IN " \
+                f"SELECT term, pmids, count FROM searches WHERE settings = ? AND term IN " \
                 f"({','.join('?' * len(chunk))})", [searchSettings] + chunk)
-            found.update({term : json.loads(pmids) for term, pmids in rows})
+            found.update({term : (json.loads(pmids), count) for term, pmids, count in rows})
         return found
 
     def addSearch(self, term : str, pmids : list, count : int) -> None:
@@ -110,8 +116,7 @@ class PubMedCache:
     def articles(self, pmids : list) -> dict:
         """Title and abstract of the PMIDs already fetched."""
         found = {}
-        for start in range(0, len(pmids), 500):
-            chunk = pmids[start:start + 500]
+        for chunk in chunks(pmids, queryChunk):
             rows = self.connection.execute(
                 f"SELECT pmid, title, abstract FROM articles WHERE pmid IN " \
                 f"({','.join('?' * len(chunk))})", chunk)
@@ -124,22 +129,20 @@ class PubMedCache:
             [(pmid, title, abstract, today) for pmid, (title, abstract) in articles.items()])
         self.connection.commit()
 
-    def spans(self, sentences : list, model : str) -> dict:
-        """The NER spans of the sentences already tagged with the model."""
+    def entities(self, sentences : list, model : str) -> dict:
+        """The entities [start, end, group] of the sentences already tagged with the model."""
         keys  = {sentenceKey(s) : s for s in sentences}
         found = {}
-        hashes = list(keys)
-        for start in range(0, len(hashes), 500):
-            chunk = hashes[start:start + 500]
+        for chunk in chunks(list(keys), queryChunk):
             rows = self.connection.execute(
                 f"SELECT sentence, spans FROM entities WHERE model = ? AND sentence IN " \
                 f"({','.join('?' * len(chunk))})", [model] + chunk)
             found.update({keys[h] : json.loads(spans) for h, spans in rows})
         return found
 
-    def addSpans(self, spans : dict, model : str) -> None:
+    def addEntities(self, entities : dict, model : str) -> None:
         self.connection.executemany("INSERT OR REPLACE INTO entities VALUES (?, ?, ?)",
-            [(sentenceKey(s), model, json.dumps(v)) for s, v in spans.items()])
+            [(sentenceKey(s), model, json.dumps(v)) for s, v in entities.items()])
         self.connection.commit()
 
 def sentenceKey(sentence : str) -> str:
@@ -150,10 +153,14 @@ def sentenceKey(sentence : str) -> str:
 # The E-utilities of PubMed: esearch (PMIDs of a term) and efetch (articles).
 # ==============================================================================
 
+class EUtilitiesError(RuntimeError):
+    """A request to the E-utilities failed, or its answer could not be read."""
+
 class EUtilities:
     """
     Requests to the E-utilities, at most syngen.pubmed.requests_per_second,
-    retried with a growing pause after a failure (e.g. HTTP 429 or 5xx).
+    retried with a growing pause after a failure that may pass (HTTP 429, 5xx,
+    a connection error or timeout).
     """
 
     def __init__(self) -> None:
@@ -174,7 +181,12 @@ class EUtilities:
             self.parameters["email"] = pubmedConfig.email
 
     def request(self, utility : str, parameters : dict, post : bool = False) -> str:
-        """The text of the answer of an E-utility."""
+        """
+        The text of the answer of an E-utility.
+
+        :raises EUtilitiesError: If it failed pubmed.retries + 1 times, or
+            with an HTTP error that does not pass (4xx other than 429).
+        """
         import requests
 
         parameters = self.parameters | parameters
@@ -191,21 +203,26 @@ class EUtilities:
                 if response.status_code == 200:
                     return response.text
                 reason = f"HTTP {response.status_code}"
+                if 400 <= response.status_code < 500 and response.status_code != 429:
+                    break
             except requests.RequestException as e:
                 reason = type(e).__name__
             if attempt < pubmedConfig.retries:
                 wait = 2 ** attempt
                 l.warning(f"{utility} failed ({reason}); retrying in {wait} s.", cmdline = False)
                 time.sleep(wait)
-        raise RuntimeError(f"{utility} failed {pubmedConfig.retries + 1} times, last: {reason}.")
+        raise EUtilitiesError(f"{utility} failed: {reason}.")
 
     def search(self, term : str) -> tuple[list, int]:
         """
         The PMIDs of the most relevant articles with the term (as a phrase)
         in syngen.pubmed.field, published up to max_date, and how many there
         are in total.
+
+        :raises EUtilitiesError: If the request failed or its answer is no
+            search result.
         """
-        answer = json.loads(self.request("esearch.fcgi", {
+        text = self.request("esearch.fcgi", {
             "db"       : "pubmed",
             "term"     : searchTerm(term),
             "retmax"   : pubmedConfig.articles_per_query,
@@ -214,20 +231,33 @@ class EUtilities:
             "mindate"  : minDate,
             "maxdate"  : pubmedConfig.max_date,
             "retmode"  : "json"
-        }))
-        result = answer.get("esearchresult", {})
-        return [str(pmid) for pmid in result.get("idlist", [])], int(result.get("count", 0))
+        })
+        try:
+            result = json.loads(text)["esearchresult"]
+            return [str(pmid) for pmid in result.get("idlist", [])], int(result.get("count", 0))
+        except (ValueError, KeyError, TypeError) as e:
+            raise EUtilitiesError(f"esearch gave no search result ({type(e).__name__}).") from e
 
     def fetch(self, pmids : list) -> dict:
-        """Title and abstract per PMID; ("", "") for one PubMed did not return."""
+        """
+        Title and abstract per PMID; ("", "") for one PubMed did not return.
+
+        :raises EUtilitiesError: If the request failed or its answer is no
+            XML.
+        """
         text = self.request("efetch.fcgi", {
             "db" : "pubmed", "id" : ",".join(pmids), "retmode" : "xml"
         }, post = True)
+        try:
+            root = ElementTree.fromstring(text)
+        except ElementTree.ParseError as e:
+            raise EUtilitiesError(f"efetch gave no XML ({e}).") from e
         articles = {pmid : ("", "") for pmid in pmids}
-        for article in ElementTree.fromstring(text).iter("PubmedArticle"):
+        for article in root.iter("PubmedArticle"):
             pmid = article.findtext("MedlineCitation/PMID", default = "").strip()
             titleElement = article.find(".//ArticleTitle")
             title = "".join(titleElement.itertext()).strip() if titleElement is not None else ""
+            # A structured abstract has several parts (background, methods, ...).
             abstract = " ".join("".join(part.itertext()).strip()
                 for part in article.findall(".//Abstract/AbstractText"))
             if pmid in articles:
@@ -244,71 +274,85 @@ def searchTerm(term : str) -> str:
     return f"\"{cleaned}\"[{pubmedConfig.field}]"
 
 # ==============================================================================
-# The terms searched per concept, and fetching their articles.
+# Searching the terms and fetching their articles.
 # ==============================================================================
-
-def seedTerms(previous : pd.DataFrame, labels : dict, concepts : list) -> dict:
-    """
-    The terms searched per concept: its label and its LLM synonyms (not
-    those equal to the label), each once (lexicalKey()).
-    """
-    llmSynonyms = previous[(previous[sourceColumn] == llmStage) & ~previous[asLabelColumn]]
-    byConcept = llmSynonyms.groupby(idColumn, sort = False)[synonymColumn].agg(list).to_dict()
-    seeds = {}
-    for hpoID in concepts:
-        terms = [labels[hpoID]] + byConcept.get(hpoID, [])
-        unique = {}
-        for term in terms:
-            unique.setdefault(lexicalKey(term), term)
-        seeds[hpoID] = [term for key, term in unique.items() if key != ""]
-    return seeds
 
 def fetchArticles(cache : PubMedCache, terms : list) -> None:
     """
-    Searches every term not searched yet and fetches every article of the
-    results not fetched yet.
+    Searches every term not searched yet (or whose search failed) and fetches
+    every article of the results not fetched yet. A failed search or fetch is
+    logged and tried again by the next run; it does not stop the others.
     """
     terms   = list(dict.fromkeys(terms))
     done    = cache.searched(terms)
-    missing = [term for term in terms if term not in done]
-    l.log(f"{len(terms)} terms, {len(done)} already searched, {len(missing)} to search.")
+    missing = [term for term in terms if term not in done or done[term][1] == failedSearch]
+    l.log(f"{len(terms)} terms, {len(terms) - len(missing)} already searched, " \
+        f"{len(missing)} to search.")
 
     client = None
     if len(missing) > 0:
         client = EUtilities()
-        started = time.monotonic()
+        started, failed = time.monotonic(), 0
         for index, term in enumerate(missing):
-            pmids, count = client.search(term)
+            try:
+                pmids, count = client.search(term)
+            except EUtilitiesError as e:
+                l.warning(f"Searching {quote(term)} failed: {e}", cmdline = False)
+                pmids, count = [], failedSearch
+                failed += 1
             cache.addSearch(term, pmids, count)
             if (index + 1) % 1000 == 0 or index + 1 == len(missing):
                 elapsed = time.monotonic() - started
-                l.log(f"Searched {index + 1}/{len(missing)} terms " \
+                l.log(f"Searched {index + 1}/{len(missing)} terms, {failed} failed " \
                     f"(~{elapsed / (index + 1) * (len(missing) - index - 1) / 60:.0f} min left).")
+        if failed > 0:
+            l.warning(f"{failed} of {len(missing)} searches failed (see the log file); " \
+                "they are tried again by the next run.")
         done = cache.searched(terms)
 
-    pmids   = list(dict.fromkeys(pmid for term in terms for pmid in done.get(term, [])))
+    pmids   = list(dict.fromkeys(pmid for term in terms for pmid in done.get(term, ([], 0))[0]))
     fetched = cache.articles(pmids)
     missing = [pmid for pmid in pmids if pmid not in fetched]
     l.log(f"{len(pmids)} articles, {len(fetched)} already fetched, {len(missing)} to fetch.")
     if len(missing) > 0:
         client = client or EUtilities()
-        for start in range(0, len(missing), fetchBatchSize):
-            cache.addArticles(client.fetch(missing[start:start + fetchBatchSize]))
-            if (start // fetchBatchSize + 1) % 50 == 0 or start + fetchBatchSize >= len(missing):
-                l.log(f"Fetched {min(start + fetchBatchSize, len(missing))}/{len(missing)} articles.")
+        failed = 0
+        batches = list(chunks(missing, fetchBatchSize))
+        for index, batch in enumerate(batches):
+            try:
+                cache.addArticles(client.fetch(batch))
+            except EUtilitiesError as e:
+                l.warning(f"Fetching {len(batch)} articles (from PMID {batch[0]}) failed: {e}",
+                    cmdline = False)
+                failed += len(batch)
+            if (index + 1) % 50 == 0 or index + 1 == len(batches):
+                l.log(f"Fetched {min((index + 1) * fetchBatchSize, len(missing))}/{len(missing)} " \
+                    f"articles, {failed} failed.")
+        if failed > 0:
+            l.warning(f"Fetching {failed} of {len(missing)} articles failed (see the log file); " \
+                "they are tried again by the next run.")
 
 # ==============================================================================
-# Candidates: the NER spans of the sentences mentioning a searched term.
+# Candidates: the NER entities of the sentences mentioning a searched term.
 # ==============================================================================
 
 # A sentence ends at ".", "!" or "?" followed by white space and an upper case
 # letter, digit or bracket; "0.5" or "e.g. the" are not split.
 _sentenceEnd = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(\[])")
+_nonWord     = re.compile(r"\W+")
 
 def sentencesOf(title : str, abstract : str) -> list[str]:
     """The title and the sentences of the abstract of an article."""
     parts = [title.strip()] + _sentenceEnd.split(abstract.strip())
     return [part.strip() for part in parts if len(part.strip()) > 0]
+
+def wordKey(text : str) -> str:
+    """
+    The lexicalKey() of a text with every run of other characters than
+    letters and digits as one space, and a space at both ends, so that a term
+    is found in a sentence as whole words: " ear " is not in " year ".
+    """
+    return " " + _nonWord.sub(" ", lexicalKey(text)).strip() + " "
 
 def plausible(candidate : str) -> bool:
     """
@@ -330,10 +374,23 @@ def plausible(candidate : str) -> bool:
     words = candidate.split()
     return len(words[-1]) > 1
 
+def spansOf(entities : list) -> list[tuple[int, int]]:
+    """
+    The spans (start, end) of the entities [start, end, group] of a sentence
+    that are of one of syngen.pubmed.entity_groups (all if it is empty), and
+    of every two adjacent ones (at most 5 characters apart, e.g. "short" and
+    "stature"), as NER often splits a term.
+    """
+    groups   = set(pubmedConfig.entity_groups)
+    entities = sorted([e for e in entities if len(groups) == 0 or e[2] in groups], key = lambda e: e[0])
+    spans    = [(e[0], e[1]) for e in entities]
+    spans   += [(a[0], b[1]) for a, b in zip(entities, entities[1:]) if 0 <= b[0] - a[1] <= 5]
+    return spans
+
 class EntityTagger:
     """
     The NER model (syngen.pubmed.ner_model) on the GPU if there is one; its
-    spans are cached per sentence.
+    entities are cached per sentence.
     """
 
     def __init__(self, cache : PubMedCache) -> None:
@@ -341,43 +398,31 @@ class EntityTagger:
         self.pipeline = None
 
     def load(self):
+        """The NER pipeline, loaded on first use."""
         if self.pipeline is None:
             import torch
             from transformers import pipeline
 
-            l.log(f"Loading the NER model {quote(pubmedConfig.ner_model)}...")
-            self.pipeline = pipeline("ner", model = pubmedConfig.ner_model,
-                aggregation_strategy = "simple", device = 0 if torch.cuda.is_available() else -1)
-            l.log(f"Loading the NER model {quote(pubmedConfig.ner_model)} completed.")
+            with l.step(f"Loading the NER model {quote(pubmedConfig.ner_model)}"):
+                self.pipeline = pipeline("ner", model = pubmedConfig.ner_model,
+                    aggregation_strategy = "simple", device = 0 if torch.cuda.is_available() else -1)
         return self.pipeline
 
-    def spans(self, sentences : list) -> dict:
-        """
-        The spans [start, end] of the entities of every sentence; adjacent
-        entities (at most 5 characters apart, e.g. "short" and "stature")
-        are also joined into one span.
-        """
+    def entities(self, sentences : list) -> dict:
+        """The entities [start, end, group] of every sentence."""
         sentences = list(dict.fromkeys(sentences))
-        found   = self.cache.spans(sentences, pubmedConfig.ner_model)
+        found   = self.cache.entities(sentences, pubmedConfig.ner_model)
         missing = [s for s in sentences if s not in found]
-        if len(missing) > 0:
-            tagger = self.load()
-            for start in range(0, len(missing), 10 * pubmedConfig.ner_batch_size):
-                chunk = missing[start:start + 10 * pubmedConfig.ner_batch_size]
-                tagged = {}
-                results = tagger(chunk, batch_size = pubmedConfig.ner_batch_size)
-                # A single sentence may come back without the outer list.
-                if len(chunk) == 1 and (len(results) == 0 or isinstance(results[0], dict)):
-                    results = [results]
-                for sentence, entities in zip(chunk, results):
-                    entities = sorted(entities, key = lambda e: e["start"])
-                    spans = [[int(e["start"]), int(e["end"])] for e in entities]
-                    for a, b in zip(entities, entities[1:]):
-                        if 0 <= b["start"] - a["end"] <= 5:
-                            spans.append([int(a["start"]), int(b["end"])])
-                    tagged[sentence] = spans
-                self.cache.addSpans(tagged, pubmedConfig.ner_model)
-                found.update(tagged)
+        l.log(f"{len(sentences)} sentences, {len(found)} already tagged, {len(missing)} to tag.")
+        for batch in chunks(missing, 10 * pubmedConfig.ner_batch_size):
+            results = self.load()(batch, batch_size = pubmedConfig.ner_batch_size)
+            # A single sentence may come back without the outer list.
+            if len(batch) == 1 and (len(results) == 0 or isinstance(results[0], dict)):
+                results = [results]
+            tagged = {sentence : [[int(e["start"]), int(e["end"]), str(e.get("entity_group", ""))]
+                for e in entities] for sentence, entities in zip(batch, results)}
+            self.cache.addEntities(tagged, pubmedConfig.ner_model)
+            found.update(tagged)
         return found
 
 def findCandidates(cache : PubMedCache, seeds : dict) -> pd.DataFrame:
@@ -388,52 +433,57 @@ def findCandidates(cache : PubMedCache, seeds : dict) -> pd.DataFrame:
     candidate (lexicalKey()) with the term that found it first, its first
     PMIDs and how often it was found.
     """
-    allTerms = [term for terms in seeds.values() for term in terms]
-    searched = cache.searched(list(dict.fromkeys(allTerms)))
+    allTerms   = list(dict.fromkeys(term for terms in seeds.values() for term in terms))
+    searched   = cache.searched(allTerms)
     unsearched = [term for term in allTerms if term not in searched]
     if len(unsearched) > 0:
         raise RuntimeError(f"{len(unsearched)} terms have not been searched; run with --fetch " \
             "(e.g. on a node with internet access) first.")
-    pmids    = list(dict.fromkeys(p for term in allTerms for p in searched[term]))
+    failed = [term for term in allTerms if searched[term][1] == failedSearch]
+    if len(failed) > 0:
+        l.warning(f"The search of {len(failed)} of {len(allTerms)} terms failed; they have no " \
+            "articles. Run with --fetch to search them again.")
+
+    pmids    = list(dict.fromkeys(p for term in allTerms for p in searched[term][0]))
     articles = cache.articles(pmids)
+    if len(articles) < len(pmids):
+        l.warning(f"{len(pmids) - len(articles)} of {len(pmids)} articles have not been fetched; " \
+            "run with --fetch to fetch them.")
     # Every sentence with its key, to find the term in it.
-    sentences = {pmid : [(s, lexicalKey(s)) for s in sentencesOf(*articles.get(pmid, ("", "")))]
+    sentences = {pmid : [(s, wordKey(s)) for s in sentencesOf(*articles.get(pmid, ("", "")))]
         for pmid in pmids}
 
-    # The sentences of every (term, PMID) pair to tag.
+    # The sentences of every (concept, term, PMID) to tag.
     selected = []
     for hpoID, terms in seeds.items():
         for term in terms:
-            key = lexicalKey(term)
-            for pmid in searched[term]:
-                for sentence, textKey in sentences[pmid]:
-                    if pubmedConfig.sentences == "all" or key in textKey:
+            key = wordKey(term)
+            for pmid in searched[term][0]:
+                for sentence, sentenceWords in sentences[pmid]:
+                    if pubmedConfig.sentences == "all" or key in sentenceWords:
                         selected.append((hpoID, term, pmid, sentence))
-    l.log(f"{len(selected)} sentences of {len(pmids)} articles mention their term.")
+    l.log(f"{len(selected)} sentences of {len(pmids)} articles to search for candidates " \
+        f"(syngen.pubmed.sentences {quote(pubmedConfig.sentences)}).")
 
-    tagger = EntityTagger(cache)
     with l.step("Finding the entities of the sentences"):
-        spans = tagger.spans([sentence for _, _, _, sentence in selected])
+        entities = EntityTagger(cache).entities([sentence for _, _, _, sentence in selected])
 
     found = {}
     for hpoID, term, pmid, sentence in selected:
-        for start, end in spans.get(sentence, []):
+        for start, end in spansOf(entities.get(sentence, [])):
             candidate = sentence[start:end].strip()
             if not plausible(candidate):
                 continue
-            key = (hpoID, lexicalKey(candidate))
-            entry = found.setdefault(key, {
+            entry = found.setdefault((hpoID, lexicalKey(candidate)), {
                 idColumn : hpoID, synonymColumn : candidate, sourceColumn : pubmedStage,
                 seedColumn : term, "pmids" : [], frequencyColumn : 0})
             entry[frequencyColumn] += 1
             if pmid not in entry["pmids"]:
                 entry["pmids"].append(pmid)
 
-    rows = []
     for entry in found.values():
         entry[evidenceColumn] = " ".join(entry.pop("pmids")[:5])
-        rows.append(entry)
-    candidates = synonymFrame(rows)
+    candidates = synonymFrame(list(found.values()))
     l.log(f"{len(candidates.index)} candidates of {candidates[idColumn].nunique()} concepts.")
     return candidates
 
@@ -450,9 +500,9 @@ def runModel(modelID : str, fetchOnly : bool) -> None:
     l.printHeader(f"Finding Synonyms in PubMed ({modelName})")
 
     previous = readSynonyms(outputFileStage(previousStage(pubmedStage), modelName))
-    labels   = {hpoID : info["label"] for hpoID, info in conceptInformation(readTask()).items()}
+    labels   = labelsByConcept(readTask())
     concepts = [hpoID for hpoID in taskConcepts() if hpoID in labels]
-    seeds    = seedTerms(previous, labels, concepts)
+    seeds    = seedTerms(previous, labels, concepts, [llmStage], withLabel = True)
     l.log(f"{sum(len(t) for t in seeds.values())} terms of {len(seeds)} concepts to search, " \
         f"articles up to {pubmedConfig.max_date}.")
 
@@ -469,38 +519,20 @@ def runModel(modelID : str, fetchOnly : bool) -> None:
     with l.step("Ranking the candidates"):
         found = rankCandidates(candidates, previous, labels,
             pubmedConfig.min_similarity, pubmedConfig.max_candidates)
-    found[modelColumn] = modelName
-    found = markAsLabel(found, labels)
-
-    synonyms = pd.concat([previous, found], ignore_index = True)[synonymFileColumns]
-    writeHugeCSV(synonyms, outputFileStage(pubmedStage, modelName))
-    l.log(f"{len(found.index)} synonyms from PubMed, {len(synonyms.index)} in total.")
+    writeStage(pubmedStage, modelName, previous, found, labels)
 
 def main() -> None:
     """
     Runs the PubMed stage of the experiment for every model.
     """
-    l.log(f"Command: python3 {shlex.join(sys.argv)}")
-
-    if experimentIndex is None:
-        sys.exit("Give the index of the experiment.")
+    startRun(allowedOptions = ("--fetch",))
     if pubmedStage not in experimentStages:
         l.log(f"Experiment {experimentIndex} has no PubMed stage.")
         return
 
     fetchOnly = "--fetch" in options
-    failed = []
-    for modelID in modelIDs:
-        try:
-            with l.step(f"PubMed stage ({modelNameOf(modelID)})"):
-                runModel(modelID, fetchOnly)
-        except (Exception, SystemExit):
-            l.exception(f"The PubMed stage of {quote(modelID)} failed.", cmdline = False)
-            failed.append(modelID)
-
-    if len(failed) > 0:
-        l.error(f"{len(failed)} of {len(modelIDs)} model(s) failed: {applyFormat(failed)}.")
-        sys.exit(1)
+    runForModels("Fetching the PubMed articles" if fetchOnly else "Finding synonyms in PubMed",
+        lambda modelID: runModel(modelID, fetchOnly))
 
 
 if __name__ == "__main__":

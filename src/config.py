@@ -24,8 +24,8 @@ sys.dont_write_bytecode = True
 # (adapter, embedder, llm, logger, normalizer).
 configFile = "./config/config.yaml"
 
-with open(configFile, "r", encoding = "utf-8") as f:
-    configurationFile = yaml.safe_load(f)
+with open(configFile, "r", encoding = "utf-8") as configHandle:
+    configurationFile = yaml.safe_load(configHandle)
 
 syngenConfig = SyngenConfig.model_validate(configurationFile["syngen"])
 
@@ -35,11 +35,16 @@ syngenConfig = SyngenConfig.model_validate(configurationFile["syngen"])
 #   <index>             the experiment syngen.experiments[<index>], from 0,
 #                       with every model of llm.model_id;
 #   <index> <model ID>  only this model.
-# Options (e.g. --fetch) are left to the scripts.
+# Options (e.g. --fetch) are checked by the scripts (startRun() in
+# SynGenUtils.py), which know the options they take.
 # =============================================================================
 
 arguments = [argument for argument in sys.argv[1:] if not argument.startswith("--")]
 options   = [argument for argument in sys.argv[1:] if argument.startswith("--")]
+
+if len(arguments) > 2:
+    sys.exit(f"Too many arguments: {' '.join(arguments)}; give the experiment index and " \
+        "at most one model ID.")
 
 experimentIndex = None
 if len(arguments) > 0:
@@ -95,6 +100,9 @@ def previousStage(stage : str) -> str | None:
 modelIDs = []
 if experimentIndex is not None:
     modelIDs = arguments[1:2] or list(configurationFile["llm"]["model_id"])
+    unknown  = [modelID for modelID in modelIDs if modelID not in configurationFile["llm"]["model_id"]]
+    if len(unknown) > 0:
+        sys.exit(f"The model '{unknown[0]}' is not in llm.model_id.")
 
 def modelNameOf(modelID : str) -> str:
     """

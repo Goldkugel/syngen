@@ -17,7 +17,6 @@ PubMed and ConceptNet stages already and filled in here for the others.
 """
 
 import hashlib
-import shlex
 import sys
 
 import numpy  as np
@@ -73,11 +72,19 @@ def bestSimilarities(ids : list, vectors : np.ndarray, otherIDs : list,
         best[rows] = (vectors[rows] @ otherVectors[others].T).max(axis = 1)
     return best
 
-def embedModel(modelName : str) -> None:
+def embedModel(modelID : str) -> None:
     """
-    Embeds and normalises the generated and gold synonyms of one model's run.
+    Embeds and normalises the generated and gold synonyms of one model's run,
+    unless they are up to date.
     """
+    modelName = modelNameOf(modelID)
     inputFile = outputFileStage(finalStage, modelName)
+    outputs   = [outputFileEmbedded(modelName), outputFileEmbeddedGold(modelName)]
+    if not any(outdated(output, [inputFile, inputFileTask], embedOutputSettings) for output in outputs):
+        l.log(f"The embedded synonyms of {quote(modelName)} are up to date.")
+        return
+
+    l.printHeader(f"Embedding the Synonyms ({modelName})")
     generated = readSynonyms(inputFile)
     data      = readTask()
     concepts  = set(taskConcepts())
@@ -97,10 +104,13 @@ def embedModel(modelName : str) -> None:
         generated[embeddingKeyColumn] = embeddingKeys(generatedVectors)
         gold[embeddingKeyColumn]      = embeddingKeys(goldVectors)
 
-        missing = generated[similarityColumn].isna()
-        generated.loc[missing, similarityColumn] = similarities(
-            generated.loc[missing, synonymColumn].tolist(),
-            [labels.get(hpoID, "") for hpoID in generated.loc[missing, idColumn]])
+        # The similarity to the label of the synonyms whose stage has not
+        # computed it (the LLM's).
+        missing = generated[similarityColumn].isna().to_numpy()
+        if missing.any():
+            labelVectors = embed([labels.get(hpoID, "") for hpoID in generated.loc[missing, idColumn]])
+            generated.loc[missing, similarityColumn] = np.sum(
+                generatedVectors[missing] * labelVectors, axis = 1)
 
     with l.step("Comparing generated and gold synonyms"):
         generated[goldSimilarityColumn] = bestSimilarities(generated[idColumn].tolist(),
@@ -112,12 +122,13 @@ def embedModel(modelName : str) -> None:
             gold[stageSimilarityColumn(stage)] = bestSimilarities(gold[idColumn].tolist(),
                 goldVectors, generated.loc[ofStage, idColumn].tolist(), generatedVectors[ofStage])
 
+    match = syngenConfig.evaluation.embedding_match
     for stage in experimentStages:
         ofStage = generated[sourceColumn] == stage
         l.log(f"{quote(stage)}: {ofStage.sum()} synonyms, mean similarity to the label " \
-            f"{generated.loc[ofStage, similarityColumn].mean():.4f}; gold synonyms with an " \
-            f"equal one (similarity >= 0.9999): " \
-            f"{(gold[stageSimilarityColumn(stage)] >= 0.9999).sum()}.")
+            f"{generated.loc[ofStage, similarityColumn].mean():.4f}; " \
+            f"{(gold[stageSimilarityColumn(stage)] >= match - similarityTolerance).sum()} gold " \
+            f"synonyms have one of a similarity of at least {match}.")
 
     writeHugeCSV(generated, outputFileEmbedded(modelName))
     writeSettings(outputFileEmbedded(modelName), embedOutputSettings)
@@ -129,28 +140,8 @@ def main() -> None:
     Embeds the synonyms of the experiment for every model whose output is
     missing or outdated.
     """
-    l.log(f"Command: python3 {shlex.join(sys.argv)}")
-    if experimentIndex is None:
-        sys.exit("Give the index of the experiment.")
-
-    failed = []
-    for modelID in modelIDs:
-        modelName = modelNameOf(modelID)
-        inputs = [outputFileStage(finalStage, modelName), inputFileTask]
-        if not any(outdated(output, inputs, embedOutputSettings) for output in
-                [outputFileEmbedded(modelName), outputFileEmbeddedGold(modelName)]):
-            l.log(f"The embedded synonyms of {quote(modelName)} are up to date.")
-            continue
-        try:
-            with l.step(f"Embedding the synonyms ({modelName})"):
-                embedModel(modelName)
-        except (Exception, SystemExit):
-            l.exception(f"Embedding the synonyms of {quote(modelID)} failed.", cmdline = False)
-            failed.append(modelID)
-
-    if len(failed) > 0:
-        l.error(f"{len(failed)} of {len(modelIDs)} model(s) failed: {applyFormat(failed)}.")
-        sys.exit(1)
+    startRun()
+    runForModels("Embedding the synonyms", embedModel)
 
 
 if __name__ == "__main__":

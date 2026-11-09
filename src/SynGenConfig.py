@@ -121,6 +121,9 @@ class PubMedConfig(BaseModel):
     # The token classification model finding the candidates.
     ner_model: str                              = "d4data/biomedical-ner-all"
     ner_batch_size: int                         = Field(default = 64, gt = 0)
+    # The entity groups of the NER model that are candidates (e.g.
+    # "Sign_symptom", "Disease_disorder"); all if empty.
+    entity_groups: list[str]                    = []
     # "seed": only sentences mentioning the searched term; "all": every one.
     sentences: Literal["seed", "all"]           = "seed"
     # Shorter candidates are dropped.
@@ -183,8 +186,9 @@ class EvaluationConfig(BaseModel):
     threshold_lower: float                      = Field(default = 0.5, ge = -1, le = 1)
     threshold_upper: float                      = Field(default = 1.0, ge = -1, le = 1)
     threshold_step: float                       = Field(default = 0.01, gt = 0)
-    # Bootstrap samples (over concepts) of the 95% intervals.
+    # Bootstrap samples (over concepts) of the 95% intervals, and their seed.
     bootstrap_samples: int                      = Field(default = 1000, gt = 0)
+    bootstrap_seed: int                         = 0
 
     @model_validator(mode = "after")
     def checkThresholds(self) -> "EvaluationConfig":

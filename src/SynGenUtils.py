@@ -1,10 +1,11 @@
 """
 Helpers shared by the scripts of syngen: the transformed HPO in the format of
 the adapter package and its gold standard, the information of the concepts
-for the prompts, the settings records that decide whether an output is
-outdated, reading and writing CSV files, parsing the answers of the LLM, the
-keys synonyms are compared by, the preparation run (transformation,
-development and evaluation set, few-shot examples).
+for the prompts, the start of a run and the loop over its models, the
+settings records that decide whether an output is outdated, reading and
+writing CSV files, parsing the answers of the LLM, the keys synonyms are
+compared by, embedding, the synonym files of the stages and the preparation
+run (transformation, development and evaluation set, few-shot examples).
 """
 
 import ast
@@ -12,8 +13,8 @@ import functools
 import json
 import os
 import re
+import shlex
 import sys
-import textwrap
 import unicodedata
 
 import numpy        as np
@@ -64,13 +65,6 @@ def quote(string : str) -> str:
     """
     return quotationCharacter + str(string) + quotationCharacter
 
-def shorten(string, width : int = 60) -> str:
-    """
-    A text cut at a word to at most width characters, with " ..." where it
-    is cut, so that a log row stays short.
-    """
-    return textwrap.shorten(str(string), width = width, placeholder = " ...")
-
 def applyFormat(l : list[str] = []) -> str:
     """
     A list of strings as one text, each quoted and separated by commas, e.g.
@@ -84,6 +78,61 @@ def applyFormat(l : list[str] = []) -> str:
         else:
             string = ", ".join(quote(element) for element in l)
     return string
+
+def chunks(values : list, size : int):
+    """The values in lists of at most `size`, e.g. for SQL queries with IN."""
+    for start in range(0, len(values), size):
+        yield values[start:start + size]
+
+def configurationCopy() -> dict:
+    """
+    A deep copy of the configuration file, e.g. to change the settings a
+    package is given without changing those of the other steps.
+    """
+    return json.loads(json.dumps(configurationFile))
+
+# ------------------------------------------------------------------------------
+# The start of a run, and the loop over its models
+# ------------------------------------------------------------------------------
+
+def startRun(allowedOptions : tuple = (), experimentRequired : bool = True) -> None:
+    """
+    Logs the command line (the first row of the log file, which is named
+    after the start of the run only) and ends the run if it has an option
+    the script does not know (e.g. a typo of --fetch) or, if
+    experimentRequired, no experiment index.
+    """
+    l = Logger()
+    l.log(f"Command: python3 {shlex.join(sys.argv)}")
+    unknown = [option for option in options if option not in allowedOptions]
+    if len(unknown) > 0:
+        takes = applyFormat(list(allowedOptions)) if len(allowedOptions) > 0 else "no options"
+        l.error(f"Unknown option(s) {applyFormat(unknown)}; this script takes {takes}.")
+        sys.exit(1)
+    if experimentRequired and experimentIndex is None:
+        l.error("Give the index of the experiment in syngen.experiments (from 0).")
+        sys.exit(1)
+
+def runForModels(action : str, function) -> None:
+    """
+    Calls function(modelID) for every model of the run (modelIDs) as a step
+    named after the action and the model. A failing model does not stop the
+    others: the step's rows give the reason and the traceback goes to the
+    log file. Ends the run with exit code 1 if a model failed.
+    """
+    l = Logger()
+    failed = []
+    for index, modelID in enumerate(modelIDs):
+        try:
+            with l.step(f"{action} ({modelNameOf(modelID)}, model {index + 1}/{len(modelIDs)})"):
+                function(modelID)
+        except (Exception, SystemExit):
+            l.exception(f"{action} with {quote(modelID)} failed.", cmdline = False)
+            failed.append(modelID)
+
+    if len(failed) > 0:
+        l.error(f"{len(failed)} of {len(modelIDs)} model(s) failed: {applyFormat(failed)}.")
+        sys.exit(1)
 
 # ------------------------------------------------------------------------------
 # The settings an output was made with are stored next to it
@@ -241,7 +290,7 @@ def embedder():
     """
     from embedder import Embedder
 
-    configuration = json.loads(json.dumps(configurationFile))
+    configuration = configurationCopy()
     configuration["embedder"]["model_id"] = [embeddingModelID]
     return Embedder(configuration)
 
@@ -260,6 +309,10 @@ def embed(texts : list) -> np.ndarray:
     vectors = vectors / np.where(norms > 0, norms, 1)
     index   = {text : i for i, text in enumerate(unique)}
     return vectors[[index[text] for text in texts]]
+
+# Two vectors whose cosine similarity is this close to a threshold reach it,
+# e.g. vectors of the same text with a similarity of 0.99999994.
+similarityTolerance = 1e-6
 
 def similarities(texts : list, references : list) -> np.ndarray:
     """
@@ -376,6 +429,24 @@ def logGoldCounts(name : str, data : pd.DataFrame) -> None:
     Logger().log(f"{name}: {data[idColumn].nunique()} concepts, {len(gold.index)} gold " \
         f"synonyms of {gold[idColumn].nunique()} concepts.")
 
+def promptDetails(information : dict, definition : bool = addDefinition,
+        comment : bool = addComment, structure : bool = addStructure) -> str:
+    """
+    The value of {hpo_details} in the prompts: one line per information about
+    a concept (of conceptInformation()) that is added (by default the
+    experiment's definition, comment, and parents and children for
+    structure), each starting with a line break; empty without them.
+    """
+    details = []
+    if definition:
+        details.append(f"* Definition: {quote(information['definition'])}")
+    if comment:
+        details.append(f"* Comment: {quote(information['comment'])}")
+    if structure:
+        details.append(f"* Parents: {applyFormat(information['parents'])}")
+        details.append(f"* Children: {applyFormat(information['children'])}")
+    return "".join(f"\n{line}" for line in details)
+
 # ------------------------------------------------------------------------------
 # Parsing the answers of the LLM
 # ------------------------------------------------------------------------------
@@ -455,11 +526,46 @@ def rankCandidates(candidates : pd.DataFrame, previous : pd.DataFrame, labels : 
         f"at most {maxCandidates} per concept.")
     return ranked.reset_index(drop = True)
 
+def writeStage(stage : str, modelName : str, previous : pd.DataFrame, found : pd.DataFrame,
+        labels : dict) -> None:
+    """
+    Writes the file of a stage: the synonyms of the stages before
+    (`previous`) and those the stage found, marked with the model and whether
+    they equal their label.
+    """
+    found = markAsLabel(found.copy(), labels)
+    found[modelColumn] = modelName
+    synonyms = pd.concat([previous, found], ignore_index = True)[synonymFileColumns]
+    writeHugeCSV(synonyms, outputFileStage(stage, modelName))
+    Logger().log(f"{len(found.index)} synonyms from {quote(stage)} " \
+        f"({found[asLabelColumn].sum()} equal their label), {len(synonyms.index)} in total.")
+
+def seedTerms(previous : pd.DataFrame, labels : dict, concepts : list,
+        sources : list, withLabel : bool) -> dict:
+    """
+    Per concept the terms a stage starts from: its label (if withLabel) and
+    its synonyms of the stages before that come from one of `sources` (not
+    those equal to the label), each once (lexicalKey()), in this order.
+    """
+    usable    = previous[previous[sourceColumn].isin(sources) & ~previous[asLabelColumn]]
+    byConcept = usable.groupby(idColumn, sort = False)[synonymColumn].agg(list).to_dict()
+    seeds = {}
+    for hpoID in concepts:
+        terms  = ([labels[hpoID]] if withLabel else []) + byConcept.get(hpoID, [])
+        unique = {}
+        for term in terms:
+            unique.setdefault(lexicalKey(term), term)
+        seeds[hpoID] = [term for key, term in unique.items() if key != ""]
+    return seeds
+
 def markAsLabel(synonyms : pd.DataFrame, labels : dict) -> pd.DataFrame:
     """
     Sets the as_label column: whether a synonym equals the label of its
     concept, lexically or normalised.
     """
+    # Only the labels of the concepts with synonyms are normalised.
+    concepts       = set(synonyms[idColumn])
+    labels         = {hpoID : label for hpoID, label in labels.items() if hpoID in concepts}
     labelKeys      = {hpoID : lexicalKey(label) for hpoID, label in labels.items()}
     labelNormKeys  = dict(zip(labels.keys(), normalizedKeys(list(labels.values()))))
     synonymNormKeys = normalizedKeys(synonyms[synonymColumn].tolist())

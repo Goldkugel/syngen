@@ -50,15 +50,23 @@ def testNeighbours(tmp_path, monkeypatch):
 
 def testSpans(tmp_path):
     conceptnet = ConceptNet(buildDatabase(tmp_path))
-    spans = spansOf(["Short stature"], conceptnet)["Short stature"]
+    spans = termSpans(["Short stature"], conceptnet)["Short stature"]
     assert [text for _, _, text in spans] == ["short", "stature"]
     conceptnet.close()
+
+def testRecombineCap(monkeypatch):
+    # With a cap, every span is replaced before a span is replaced twice.
+    monkeypatch.setattr(SynGenConceptNet.conceptnetConfig, "max_terms_per_seed", 2)
+    terms = [new for new, _ in recombine("Short stature",
+        [(0, 5, "short", ["small", "little", "tiny"]), (6, 13, "stature", ["height"])])]
+    assert terms == ["Small stature", "Short height"]
 
 def testRecombine():
     term = "Short stature"
     replacements = [(0, 5, "short", ["small", "Little"]), (6, 13, "stature", ["height"])]
     terms = [new for new, _ in recombine(term, replacements)]
-    assert terms == ["Small stature", "Little stature", "Short height", "Small height", "Little height"]
+    # One replacement from each span in turn, then two at once.
+    assert terms == ["Small stature", "Short height", "Little stature", "Small height", "Little height"]
     # Overlapping spans are not replaced together.
     assert len(recombine("ab", [(0, 2, "ab", ["x"]), (1, 2, "b", ["y"])])) == 2
 
@@ -67,5 +75,7 @@ def testSeedTerms():
         {idColumn : "HP:1", synonymColumn : "Small stature", sourceColumn : "llm"},
         {idColumn : "HP:1", synonymColumn : "short stature", sourceColumn : "pubmed"},
         {idColumn : "HP:1", synonymColumn : "Stature", sourceColumn : "llm", asLabelColumn : True}])
-    seeds = seedTerms(previous, {"HP:1" : "Short stature"}, ["HP:1"])
+    seeds = seedTerms(previous, {"HP:1" : "Short stature"}, ["HP:1"], ["llm"], withLabel = True)
     assert seeds == {"HP:1" : ["Short stature", "Small stature"]}
+    seeds = seedTerms(previous, {"HP:1" : "Short stature"}, ["HP:1"], ["llm", "pubmed"], withLabel = False)
+    assert seeds == {"HP:1" : ["Small stature", "short stature"]}

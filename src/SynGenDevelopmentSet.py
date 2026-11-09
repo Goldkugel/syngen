@@ -9,7 +9,6 @@ e.g. after changing the seed.
 """
 
 import sys
-import shlex
 
 sys.dont_write_bytecode = True
 
@@ -18,14 +17,20 @@ from config       import *
 
 from logger       import Logger, lockedFile
 
-# The log file is named after the start of the run only, so the command line
-# is its first line.
 l = Logger(config = configFile)
-l.log(f"Command: python3 {shlex.join(sys.argv)}")
 
-l.printHeader("Drawing the Development and Evaluation Set")
+def main() -> None:
+    """
+    Draws the development and evaluation set and the few-shot examples.
+    """
+    startRun(experimentRequired = False)
+    l.printHeader("Drawing the Development and Evaluation Set")
 
-# Under the lock of the preparation runs, which draw the sets as well.
-with lockedFile(outputFileTransformedDevelopment):
-    with l.step("Drawing the development and evaluation set"):
-        writeDevelopmentSet()
+    # Under the lock of the preparation runs, which draw the sets as well.
+    with lockedFile(outputFileTransformedDevelopment):
+        with l.step("Drawing the development and evaluation set"):
+            writeDevelopmentSet()
+
+
+if __name__ == "__main__":
+    main()
