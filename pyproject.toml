@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "syngen"
 description = "Generates synonyms of Human Phenotype Ontology concepts with an LLM, PubMed and ConceptNet, and evaluates them."
 readme = "README.md"
-version = "2.0.0"
+version = "2.0.1"
 # model and embedder require Python 3.10.
 requires-python = ">=3.10"
 authors = [{ name = "Peter Pallaoro", email = "peter.pallaoro@tum.de" }]

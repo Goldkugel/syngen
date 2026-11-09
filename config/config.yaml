@@ -117,9 +117,11 @@ llm:
   # the command line generates with only that model.
   model_id:
     - "Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4"
-  # The Hugging Face commit per model ID (see the model package); the commits
-  # of a run are recorded in data/logs/run_metadata.json.
-  revision: {}
+  # The Hugging Face commit per model ID (see the model package), so that
+  # every run loads the same model version (as of 2026-11-09); the commits of
+  # a run are recorded in data/logs/run_metadata.json.
+  revision:
+    "Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4": "da6e9d45661b91e02782f4ae2c6bb39c4a5b4821"
   device: "cuda"
   expert_parallel_models:
     - "Qwen3-30B"
