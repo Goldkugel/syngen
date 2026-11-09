@@ -2,17 +2,18 @@
 
 clear
 
-# start.sh [<step>]: one Slurm job per experiment of syngen.experiments for
-# one step of the generation (llm if none is given). The steps run in this
-# order, each once all jobs of the step before have finished:
-#   llm      generate_llm.sh              LLM generation
+# start.sh [<step>]: one step of the generation (llm if none is given) for
+# every experiment of syngen.experiments. The steps run in this order, each
+# once the step before has finished for all experiments:
+#   llm      generate_llm.sh              LLM generation (Slurm jobs)
 #   sources  generate_sources.sh          marking, PubMed, ConceptNet spans
-#   filter   filter_llm.sh                LLM filter of the ConceptNet stage
+#   filter   filter_llm.sh                LLM filter (Slurm jobs)
 #   build    generate_sources.sh --build  ConceptNet terms
-# Without syngen.conceptnet.filter, sources also builds the ConceptNet terms
-# and filter and build are not needed. Start each step from the Python
-# environment of its script (model package or normalizer); sbatch passes it
-# on to the jobs.
+# The LLM steps submit one Slurm job per experiment; sources and build run
+# here, one experiment after the other. Without syngen.conceptnet.filter,
+# sources also builds the ConceptNet terms and filter and build are not
+# needed. Start each step from the Python environment of its script (model
+# package or normalizer); sbatch passes it on to the jobs.
 STEP=${1:-llm}
 OPTION=()
 case "$STEP" in
@@ -28,6 +29,17 @@ esac
 python3 ./src/SynGenLLM.py || exit 1
 
 EXPERIMENTS=$(python3 ./src/config.py) || exit 1
+FAILED=0
 for ((INDEX = 0; INDEX < EXPERIMENTS; INDEX++)); do
-    sbatch "$SCRIPT" "$INDEX" "${OPTION[@]}"
+    if [ "$SCRIPT" = generate_sources.sh ]; then
+        # A failing experiment does not stop the others.
+        ./generate_sources.sh "$INDEX" "${OPTION[@]}" || FAILED=$((FAILED + 1))
+    else
+        sbatch "$SCRIPT" "$INDEX"
+    fi
 done
+
+if [ $FAILED -gt 0 ]; then
+    echo "start.sh: $FAILED of $EXPERIMENTS experiment(s) failed; see data/logs/." >&2
+    exit 1
+fi
