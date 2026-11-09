@@ -222,8 +222,8 @@ def outputFileLLMRaw(modelName : str) -> str:
 
 # The steps of a stage that need the model package and those that need the
 # normalizer run in different Python environments (see generate_llm.sh,
-# generate_sources.sh and filter_llm.sh) and hand their results on in these
-# files.
+# generate_sources.sh, filter_llm.sh and build_conceptnet.sh) and hand their
+# results on in these files.
 
 def outputFileLLMUnmarked(modelName : str) -> str:
     """The synonyms of the LLM before markAsLabel() (SynGenLLM.py --mark)."""
