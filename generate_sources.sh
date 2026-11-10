@@ -15,6 +15,5 @@ if [ $# -eq 0 ]; then
     set -- 0
 fi
 
-python3 ./src/SynGenLLM.py "$@" --mark || exit 1
 python3 ./src/SynGenPubMed.py "$@" || exit 1
 python3 ./src/SynGenConceptNet.py "$@" --spans

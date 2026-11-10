@@ -1,0 +1,59 @@
+[
+  {
+    "id": "HP:5200021",
+    "label": "Reduced social insight",
+    "definition": "A lack of awareness of social rules in multiple social settings, which are simple or intuitive to others in the same social setting.",
+    "comment": "",
+    "parents": [
+      "Abnormal judgment"
+    ],
+    "children": [
+      "Reduced awareness of convention",
+      "Difficulty understanding nonliteral meaning of conversation",
+      "Poor recognition of injustice",
+      "Difficulty recognizing another's emotions",
+      "Difficulty understanding humor"
+    ],
+    "synonyms": [
+      "Abnormal social awareness",
+      "Abnormal social understanding"
+    ]
+  },
+  {
+    "id": "UBERON:0005843",
+    "label": "sacral spinal cord",
+    "definition": "A spinal cord segment that adjacent_to a sacral region.",
+    "comment": "",
+    "parents": [
+      "spinal cord segment"
+    ],
+    "children": [],
+    "synonyms": [
+      "pars sacralis medullae spinalis",
+      "sacral segment of spinal cord",
+      "sacral segments of spinal cord [1-5]",
+      "segmenta sacralia medullae spinalis [1-5]"
+    ]
+  },
+  {
+    "id": "UBERON:0004479",
+    "label": "musculature of trunk",
+    "definition": "Any collection of muscles that is part of a trunk [Automatically generated definition].",
+    "comment": "",
+    "parents": [
+      "musculature"
+    ],
+    "children": [
+      "abdomen musculature",
+      "musculature of thorax",
+      "musculature of pelvic girdle",
+      "musculature of perineum",
+      "hypaxial musculature",
+      "epaxial musculature"
+    ],
+    "synonyms": [
+      "muscle group of trunk",
+      "set of muscles of trunk"
+    ]
+  }
+]

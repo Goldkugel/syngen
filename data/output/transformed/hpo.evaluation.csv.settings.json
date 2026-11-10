@@ -1,0 +1,18 @@
+{
+  "development_set": {
+    "synonym_count": 500,
+    "seed": 2898231092,
+    "few_shot_count": 3
+  },
+  "gold": {
+    "exclude_types": [
+      "obsolete"
+    ]
+  },
+  "format": [
+    "id",
+    "attribute",
+    "value",
+    "additional"
+  ]
+}
