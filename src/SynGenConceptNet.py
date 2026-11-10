@@ -21,8 +21,8 @@ three steps, which hand their results on in files:
     python3 ./src/SynGenConceptNet.py <index> [<model>] --filter   model
     python3 ./src/SynGenConceptNet.py <index> [<model>] --build    normalizer
 
-If syngen.conceptnet.filter is off, --filter does nothing and --spans builds
-the terms as well. The database is built once by SynGenConceptNetDB.py.
+If syngen.conceptnet.filter is off, --filter does nothing. The database is
+built once by SynGenConceptNetDB.py.
 """
 
 import itertools
@@ -293,9 +293,9 @@ def findSpans(modelID : str) -> None:
     modelName = modelNameOf(modelID)
     l.printHeader(f"Finding the Spans for ConceptNet ({modelName})")
 
-    previous    = readSynonyms(outputFileStage(previousStage(conceptnetStage), modelName))
     information = conceptInformation(readTask())
     labels      = {hpoID : info["label"] for hpoID, info in information.items()}
+    previous    = readPreviousStage(conceptnetStage, modelName, labels)
     concepts    = [hpoID for hpoID in taskConcepts() if hpoID in labels]
     seeds       = seedTerms(previous, labels, concepts, conceptnetConfig.seed_sources,
         withLabel = "label" in conceptnetConfig.seed_sources)
@@ -368,8 +368,8 @@ def buildTerms(modelID : str) -> None:
         kept    = {(hpoID, text) : words for hpoID, text, words in readJSON(filterFile)}
         allowed = {key : kept.get(key, []) for key in allowed}
 
-    previous = readSynonyms(outputFileStage(previousStage(conceptnetStage), modelName))
     labels   = labelsByConcept(readTask())
+    previous = readPreviousStage(conceptnetStage, modelName, labels)
 
     with l.step("Building the new terms"):
         found = {}
@@ -411,15 +411,6 @@ def main() -> None:
         return
     if chosen[0] == "--filter" and not conceptnetConfig.filter:
         l.log("syngen.conceptnet.filter is off; the neighbours are not filtered.")
-        return
-
-    # Without the filter no LLM is needed in between: --spans builds the
-    # terms as well.
-    if chosen[0] == "--spans" and not conceptnetConfig.filter:
-        def spansAndBuild(modelID : str) -> None:
-            findSpans(modelID)
-            buildTerms(modelID)
-        runForModels("Building synonyms with ConceptNet", spansAndBuild)
         return
 
     runForModels(*steps[chosen[0]])

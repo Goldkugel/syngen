@@ -1,5 +1,5 @@
 # Paths are relative to the repository root, from where the scripts are run
-# (e.g. ./generate_sources.sh, python3 ./src/SynGenLLM.py).
+# (e.g. ./2_generate_sources.sh, python3 ./src/SynGenLLM.py).
 syngen:
   # Picked by their index (from 0). Settings: test (the development set
   # instead of the evaluation set), few_shot, definition, comment, structure

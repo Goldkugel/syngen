@@ -13,7 +13,7 @@
 
 The settings of the package sections are described in the READMEs of the packages. A key a schema does not know is refused, so typos are found when a run starts; so are unknown command-line options, more than two arguments and a model ID that is not in `llm.model_id`.
 
-Some settings are constants in the code, as they rarely need a change: the earliest publication date of the PubMed search (`minDate`), the PMIDs per efetch request (`fetchBatchSize`), the most characters between two NER entities joined into one candidate (5, `spansOf()`), the decimals of the embedding key (`embeddingKeyDecimals`) and the Slurm resources (`#SBATCH` lines of `generate_llm.sh` and `filter_llm.sh`).
+Some settings are constants in the code, as they rarely need a change: the earliest publication date of the PubMed search (`minDate`), the PMIDs per efetch request (`fetchBatchSize`), the most characters between two NER entities joined into one candidate (5, `spansOf()`), the decimals of the embedding key (`embeddingKeyDecimals`) and the Slurm resources (`#SBATCH` lines of `1_generate_llm.sh` and `3_filter_llm.sh`).
 
 ## `syngen`
 

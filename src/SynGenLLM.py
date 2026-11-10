@@ -7,14 +7,14 @@ round with its own seed; a synonym records in how many rounds it was
 generated. The model package is imported by the step that needs it, so the
 preparation run does not load vLLM.
 
-The model and the normalizer need different Python environments: the
-generation (model) writes the synonyms unmarked, and --mark (normalizer) sets
-whether they equal their label and writes the file of the LLM stage.
+The model and the normalizer need different Python environments, so the
+file of the LLM stage marks the synonyms equal to their label only lexically
+(case and white space ignored); the steps after it, which run with the
+normalizer, add the normalised match (readPreviousStage()).
 
-    python3 ./src/SynGenLLM.py                         preparation
-    python3 ./src/SynGenLLM.py <index>                 experiment <index>, all models
-    python3 ./src/SynGenLLM.py <index> <model>         only this model
-    python3 ./src/SynGenLLM.py <index> [<model>] --mark
+    python3 ./src/SynGenLLM.py                  preparation
+    python3 ./src/SynGenLLM.py <index>          experiment <index>, all models
+    python3 ./src/SynGenLLM.py <index> <model>  only this model
 """
 
 import os
@@ -176,27 +176,17 @@ def generateSynonyms(modelID : str) -> pd.DataFrame:
     found = pd.DataFrame(found, columns = [idColumn, "round", synonymColumn, "key"])
     synonyms = countRounds(found)
     synonyms[modelColumn] = modelName
+    # Lexically only: the normalizer is not available here
+    synonyms = markAsLabel(synonyms, {hpoID : information[hpoID]["label"] for hpoID in concepts},
+        normalized = False)
 
     l.log(f"{len(synonyms.index)} distinct synonyms of {synonyms[idColumn].nunique()} of " \
-        f"{len(concepts)} concepts.")
+        f"{len(concepts)} concepts; {synonyms[asLabelColumn].sum()} equal their label " \
+        "(lexically).")
     for count, number in synonyms[roundsColumn].value_counts().sort_index().items():
         l.log(f"Generated in {count} of {rounds} rounds: {number} synonyms.")
 
     return synonyms
-
-def markSynonyms(modelID : str) -> None:
-    """
-    Sets whether the synonyms one LLM generated equal their label
-    (markAsLabel(), needs the normalizer) and writes the file of the LLM
-    stage.
-    """
-    modelName = modelNameOf(modelID)
-    l.printHeader(f"Marking the Synonyms ({modelName})")
-
-    synonyms = markAsLabel(readSynonyms(outputFileLLMUnmarked(modelName)),
-        labelsByConcept(readTask()))
-    l.log(f"{synonyms[asLabelColumn].sum()} of {len(synonyms.index)} synonyms equal their label.")
-    writeHugeCSV(synonyms, outputFileStage(llmStage, modelName))
 
 # ==============================================================================
 # The steps of this run.
@@ -205,20 +195,16 @@ def markSynonyms(modelID : str) -> None:
 def main() -> None:
     """
     Runs the steps: the preparation, and without an experiment index nothing
-    else; otherwise the generation of the experiment with every model, or
-    with --mark the marking of their synonyms.
+    else; otherwise the generation of the experiment with every model.
     """
-    startRun(allowedOptions = ("--mark",), experimentRequired = "--mark" in options)
+    startRun(experimentRequired = False)
 
     prepare()
     if experimentIndex is None:
         return
 
-    if "--mark" in options:
-        runForModels("Marking the synonyms", markSynonyms)
-    else:
-        runForModels("Generating the synonyms", lambda modelID: writeHugeCSV(
-            generateSynonyms(modelID), outputFileLLMUnmarked(modelNameOf(modelID))))
+    runForModels("Generating the synonyms", lambda modelID: writeHugeCSV(
+        generateSynonyms(modelID), outputFileStage(llmStage, modelNameOf(modelID))))
 
 
 # vLLM starts its workers with "spawn", which imports this script again: the

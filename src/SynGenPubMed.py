@@ -499,8 +499,8 @@ def runModel(modelID : str, fetchOnly : bool) -> None:
     modelName = modelNameOf(modelID)
     l.printHeader(f"Finding Synonyms in PubMed ({modelName})")
 
-    previous = readSynonyms(outputFileStage(previousStage(pubmedStage), modelName))
     labels   = labelsByConcept(readTask())
+    previous = readPreviousStage(pubmedStage, modelName, labels)
     concepts = [hpoID for hpoID in taskConcepts() if hpoID in labels]
     seeds    = seedTerms(previous, labels, concepts, [llmStage], withLabel = True)
     l.log(f"{sum(len(t) for t in seeds.values())} terms of {len(seeds)} concepts to search, " \

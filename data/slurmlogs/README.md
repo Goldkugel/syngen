@@ -1,6 +1,6 @@
 # Slurm logs
 
-Standard output and error of the generation jobs (`generate_llm.sh` and `filter_llm.sh`, see their `#SBATCH` lines):
+Standard output and error of the generation jobs (`1_generate_llm.sh` and `3_filter_llm.sh`, see their `#SBATCH` lines):
 
 | File | Content |
 |---|---|

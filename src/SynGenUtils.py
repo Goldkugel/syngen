@@ -558,17 +558,20 @@ def seedTerms(previous : pd.DataFrame, labels : dict, concepts : list,
         seeds[hpoID] = [term for key, term in unique.items() if key != ""]
     return seeds
 
-def markAsLabel(synonyms : pd.DataFrame, labels : dict) -> pd.DataFrame:
+def markAsLabel(synonyms : pd.DataFrame, labels : dict, normalized : bool = True) -> pd.DataFrame:
     """
     Sets the as_label column: whether a synonym equals the label of its
-    concept, lexically or normalised.
+    concept, lexically or (if `normalized`) normalised. Without `normalized`
+    the normalizer is not needed, as in the LLM's Python environment; the
+    steps after it mark the synonyms again (readPreviousStage()).
     """
     # Only the labels of the concepts with synonyms are normalised.
     concepts       = set(synonyms[idColumn])
     labels         = {hpoID : label for hpoID, label in labels.items() if hpoID in concepts}
     labelKeys      = {hpoID : lexicalKey(label) for hpoID, label in labels.items()}
-    labelNormKeys  = dict(zip(labels.keys(), normalizedKeys(list(labels.values()))))
-    synonymNormKeys = normalizedKeys(synonyms[synonymColumn].tolist())
+    labelNormKeys  = dict(zip(labels.keys(), normalizedKeys(list(labels.values())))) if normalized else {}
+    synonymNormKeys = (normalizedKeys(synonyms[synonymColumn].tolist()) if normalized
+        else [""] * len(synonyms.index))
     # Boolean also without synonyms: an empty float column would turn the
     # True of the stages before into 1.0 in writeStage(), which readSynonyms()
     # reads as False.
@@ -578,6 +581,14 @@ def markAsLabel(synonyms : pd.DataFrame, labels : dict) -> pd.DataFrame:
         for hpoID, synonym, key in zip(synonyms[idColumn], synonyms[synonymColumn], synonymNormKeys)
     ], index = synonyms.index, dtype = bool)
     return synonyms
+
+def readPreviousStage(stage : str, modelName : str, labels : dict) -> pd.DataFrame:
+    """
+    The synonyms of the stages before `stage`, marked again with the
+    normalised match, as the LLM stage only marks them lexically (see
+    markAsLabel()).
+    """
+    return markAsLabel(readSynonyms(outputFileStage(previousStage(stage), modelName)), labels)
 
 # ------------------------------------------------------------------------------
 # The preparation run: the transformed HPO, the development and evaluation

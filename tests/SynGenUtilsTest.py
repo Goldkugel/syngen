@@ -83,6 +83,22 @@ def testMarkAsLabel():
     marked = markAsLabel(synonyms, {"HP:1" : "Short stature"})
     assert marked[asLabelColumn].tolist() == [True, True, False]
 
+def testLexicalMarkingIsCompletedByTheNextStage(tmp_path, monkeypatch):
+    # The LLM stage marks without the normalizer, the next stage adds the
+    # normalised match.
+    import SynGenUtils
+    file = str(tmp_path / "llm.csv")
+    monkeypatch.setattr(SynGenUtils, "outputFileStage", lambda stage, modelName: file)
+    synonyms = synonymFrame([
+        {idColumn : "HP:1", synonymColumn : "SHORT stature", sourceColumn : llmStage},
+        {idColumn : "HP:1", synonymColumn : "Stature, short", sourceColumn : llmStage}])
+    labels = {"HP:1" : "Short stature"}
+    marked = markAsLabel(synonyms, labels, normalized = False)
+    assert marked[asLabelColumn].tolist() == [True, False]
+
+    writeHugeCSV(marked, file)
+    assert readPreviousStage(pubmedStage, "model", labels)[asLabelColumn].tolist() == [True, True]
+
 def testStageWithoutCandidatesKeepsAsLabel(tmp_path, monkeypatch):
     # A stage that finds nothing keeps the as_label of the stages before.
     import SynGenUtils

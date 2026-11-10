@@ -12,9 +12,9 @@ requires-python = ">=3.10"
 authors = [{ name = "Peter Pallaoro", email = "peter.pallaoro@tum.de" }]
 # What every script needs. The model package (vLLM) and the normalizer
 # (spaCy) need library versions that cannot be installed together, so each
-# gets its own environment: pip install -e ".[llm]" for generate_llm.sh and
-# filter_llm.sh, pip install -e ".[normalizer]" for generate_sources.sh and
-# finalize.sh.
+# gets its own environment: pip install -e ".[llm]" for steps 1 and 3
+# (1_generate_llm.sh, 3_filter_llm.sh), pip install -e ".[normalizer]" for
+# steps 2, 4 and 5.
 dependencies = [
     # All sibling packages pin logger v1.7.0, so syngen does too.
     "logger @ git+https://github.com/Goldkugel/logger.git@v1.7.0",

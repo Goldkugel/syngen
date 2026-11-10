@@ -221,14 +221,9 @@ def outputFileLLMRaw(modelName : str) -> str:
         f"{llmStage}_{generationStr}_raw_{modelName}.{csvFileFormat}")
 
 # The steps of a stage that need the model package and those that need the
-# normalizer run in different Python environments (see generate_llm.sh,
-# generate_sources.sh, filter_llm.sh and build_conceptnet.sh) and hand their
+# normalizer run in different Python environments (see the scripts
+# 1_generate_llm.sh to 4_build_conceptnet.sh) and hand their
 # results on in these files.
-
-def outputFileLLMUnmarked(modelName : str) -> str:
-    """The synonyms of the LLM before markAsLabel() (SynGenLLM.py --mark)."""
-    return outputPath(llmStage,
-        f"{llmStage}_{generationStr}_unmarked_{modelName}.{csvFileFormat}")
 
 def outputFileConceptNetSpans(modelName : str) -> str:
     """The seeds, their spans and the neighbours of the spans (--spans)."""
@@ -266,6 +261,6 @@ def outputFileEvaluation(modelName : str, name : str, fileFormat : str = plotFil
         f"eval_{generationStr}_{stagesStr(finalStage)}_{modelName}_{name}.{fileFormat}")
 
 
-# The number of experiments, for the shell scripts (finalize.sh).
+# The number of experiments, for the shell scripts (1_generate_llm.sh, ...).
 if __name__ == "__main__":
     print(len(syngenConfig.experiments))
