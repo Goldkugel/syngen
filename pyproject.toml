@@ -29,7 +29,7 @@ dependencies = [
 [project.optional-dependencies]
 # The LLM stage and the filter of the ConceptNet stage.
 llm = [
-    "model @ git+https://github.com/Goldkugel/model.git@v3.2.0",
+    "model @ git+https://github.com/Goldkugel/model.git@v3.2.1",
     # 5.5.1 or newer: vLLM 0.19 excludes 5.0 to 5.5.0, which lack tokenizer
     # attributes vLLM reads ("Qwen2Tokenizer has no attribute
     # all_special_tokens_extended"), and the tokenizer of Mistral's models
