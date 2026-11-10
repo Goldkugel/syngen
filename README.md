@@ -75,7 +75,7 @@ Inputs (see [`data/input/README.md`](data/input/README.md)):
 
 1. The HPO release at `data/input/hpo/hp.owl`.
 2. The ConceptNet 5.7 assertions at `data/input/conceptnet/conceptnet-assertions-5.7.0.csv.gz`; then build the database once with `python3 ./src/SynGenConceptNetDB.py`.
-3. Optionally an NCBI API key in the environment variable `NCBI_API_KEY` (10 instead of 3 PubMed requests per second); never put it into the configuration.
+3. Optionally an NCBI API key (10 instead of 3 PubMed requests per second) in the file `.api_key` in the repository root, which git ignores; `2_generate_sources.sh` sets the environment variable `NCBI_API_KEY` from it, unless it is set already. Never put the key into the configuration.
 
 ## Usage
 
