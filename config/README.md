@@ -40,7 +40,7 @@ Some settings are constants in the code, as they rarely need a change: the earli
 | `pubmed.entity_groups` | list | `[]` | The entity groups of the NER model that are candidates (e.g. `Sign_symptom`, `Disease_disorder`); all if empty. The cache keeps the entities of all groups, so changing it needs no new tagging |
 | `pubmed.sentences` | `"seed"` or `"all"` | `"seed"` | Only the sentences mentioning the searched term, or all |
 | `pubmed.min_length` | `int` | `3` | Shorter candidates are dropped |
-| `pubmed.min_similarity`, `pubmed.max_candidates` | `float`, `int` | `0.85`, `10` | Per concept: the candidates at least this similar to the label, the most similar `max_candidates` |
+| `pubmed.min_similarity`, `pubmed.max_candidates` | `float`, `int` | `0.85`, `10` | Per concept: the candidates at least this similar to the label, the most similar `max_candidates`; candidates equal to the label or to a synonym of the stages before after normalising do not count, and of candidates equal to each other after normalising only the most similar |
 | `conceptnet.dump` | `str` | `"./data/input/conceptnet/conceptnet-assertions-5.7.0.csv.gz"` | The ConceptNet assertions dump |
 | `conceptnet.database` | `str` | `"./data/input/conceptnet/conceptnet.sqlite"` | The database `SynGenConceptNetDB.py` builds; it records its relations and languages, and the stage refuses one built with others |
 | `conceptnet.relations` | list | `["Synonym", "FormOf"]` | The relations followed, in both directions |

@@ -497,22 +497,41 @@ def rankCandidates(candidates : pd.DataFrame, previous : pd.DataFrame, labels : 
     """
     The candidates of a stage (rows of a synonym file) that become its
     synonyms: per concept, those not yet among the synonyms of the stages
-    before (`previous`) and not equal to the label (lexicalKey()), with a
-    cosine similarity to the label of at least minSimilarity, the most
-    similar maxCandidates of them. Fills the similarity column.
+    before (`previous`) and not equal to the label, lexically (lexicalKey())
+    or normalised (normalizedKeys()), with a cosine similarity to the label
+    of at least minSimilarity, of candidates with the same normalised key
+    only the most similar, the most similar maxCandidates of them. Fills the
+    similarity column.
+
+    Without the normalised comparison, inflections and reorderings of the
+    label (e.g. "Short statures", "Stature, short"), which are about as
+    similar to it as the label itself, would take the places of new
+    synonyms, and then be marked as_label or match nothing new.
     """
     l = Logger()
     if len(candidates.index) == 0:
         return candidates
 
+    # Only the labels and synonyms of the concepts with candidates are
+    # normalised.
+    concepts = set(candidates[idColumn])
+    previous = previous[previous[idColumn].isin(concepts)]
+    labels   = {hpoID : label for hpoID, label in labels.items() if hpoID in concepts}
+    labelKeys     = {hpoID : lexicalKey(label) for hpoID, label in labels.items()}
+    labelNormKeys = dict(zip(labels.keys(), normalizedKeys(list(labels.values()))))
+
     keys     = candidates[synonymColumn].map(lexicalKey)
+    normKeys = normalizedKeys(candidates[synonymColumn].tolist())
     known    = set(zip(previous[idColumn], previous[synonymColumn].map(lexicalKey)))
-    labelKey = candidates[idColumn].map(lambda hpoID: lexicalKey(labels.get(hpoID, "")))
-    new      = [(hpoID, key) not in known and key != label and key != ""
-        for hpoID, key, label in zip(candidates[idColumn], keys, labelKey)]
-    candidates = candidates[new].copy()
+    knownNorm = set(zip(previous[idColumn], normalizedKeys(previous[synonymColumn].tolist())))
+    new = [key != "" and key != labelKeys.get(hpoID) and (hpoID, key) not in known and
+        (normKey == "" or (normKey != labelNormKeys.get(hpoID) and (hpoID, normKey) not in knownNorm))
+        for hpoID, key, normKey in zip(candidates[idColumn], keys, normKeys)]
+    # Candidates without normalised key are told apart by their lexical one.
+    candidates = candidates.assign(_key = [normKey or "lexical:" + key
+        for key, normKey in zip(keys, normKeys)])[new].copy()
     l.log(f"{len(candidates.index)} candidates are new (not the label nor a synonym of " \
-        "the stages before).")
+        "the stages before, lexically or normalised).")
 
     candidates[similarityColumn] = similarities(candidates[synonymColumn].tolist(),
         [labels.get(hpoID, "") for hpoID in candidates[idColumn]])
@@ -520,8 +539,11 @@ def rankCandidates(candidates : pd.DataFrame, previous : pd.DataFrame, labels : 
     l.log(f"{len(similar.index)} candidates have a similarity to their label of at " \
         f"least {minSimilarity}.")
 
-    ranked = similar.sort_values([idColumn, similarityColumn], ascending = [True, False],
-        kind = "stable").groupby(idColumn, sort = False).head(maxCandidates)
+    similar = similar.sort_values([idColumn, similarityColumn], ascending = [True, False],
+        kind = "stable")
+    distinct = similar.drop_duplicates(subset = [idColumn, "_key"]).drop(columns = "_key")
+    l.log(f"{len(distinct.index)} of them differ normalised from each other.")
+    ranked = distinct.groupby(idColumn, sort = False).head(maxCandidates)
     l.log(f"Kept {len(ranked.index)} candidates of {ranked[idColumn].nunique()} concepts, " \
         f"at most {maxCandidates} per concept.")
     return ranked.reset_index(drop = True)
