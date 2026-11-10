@@ -30,12 +30,14 @@ dependencies = [
 # The LLM stage and the filter of the ConceptNet stage.
 llm = [
     "model @ git+https://github.com/Goldkugel/model.git@v3.2.0",
-    # Below 5: transformers 5 removed tokenizer attributes vLLM reads when it
-    # loads a model ("Qwen2Tokenizer has no attribute
-    # all_special_tokens_extended").
-    "transformers>=4.45,<5"
+    # 5.5.1 or newer: vLLM 0.19 excludes 5.0 to 5.5.0, which lack tokenizer
+    # attributes vLLM reads ("Qwen2Tokenizer has no attribute
+    # all_special_tokens_extended"), and the tokenizer of Mistral's models
+    # (mistral_common 1.10 or newer) needs huggingface_hub 1.0 or newer,
+    # which transformers 4 does not allow.
+    "transformers>=5.5.1"
 ]
-# Marking, the PubMed stage, the spans and terms of the ConceptNet stage,
+# The PubMed stage, the spans and terms of the ConceptNet stage,
 # embedding and evaluation.
 normalizer = [
     "normalizer @ git+https://github.com/Goldkugel/normalizer.git@v1.1.3",
@@ -45,7 +47,7 @@ normalizer = [
     # SynGenPubMed.py: the E-utilities of PubMed and the NER model.
     "requests",
     "torch",
-    "transformers>=4.45,<5",
+    "transformers>=4.45",
     # SynGenEval.py.
     "matplotlib"
 ]
