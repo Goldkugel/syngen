@@ -214,3 +214,6 @@ data/slurmlogs/*.err
 data/tmp/
 *.lock
 data/cache/
+
+# Secrets: the NCBI API key is read from $NCBI_API_KEY, never from a file
+.api_key
