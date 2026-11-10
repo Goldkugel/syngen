@@ -1,8 +1,8 @@
 """
 The ConceptNet stage of syngen: replaces the words of the label and of the
 synonyms of the stages before (syngen.conceptnet.seed_sources) by their
-neighbours in ConceptNet (syngen.conceptnet.relations, e.g. Synonym and
-FormOf), optionally lets the LLM keep only the neighbours that can replace a
+neighbours in ConceptNet (syngen.conceptnet.relations, e.g. Synonym, FormOf
+and DerivedFrom), optionally lets the LLM keep only the neighbours that can replace a
 word in the concept, builds new terms with up to max_substitutions
 replacements, and keeps per concept the terms most similar to its label.
 Writes the synonyms of the stages before together with its own.

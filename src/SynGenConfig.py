@@ -145,7 +145,8 @@ class ConceptNetConfig(BaseModel):
     dump: str                                   = "./data/input/conceptnet/conceptnet-assertions-5.7.0.csv.gz"
     database: str                               = "./data/input/conceptnet/conceptnet.sqlite"
     # The relations followed from a word, in both directions.
-    relations: list[str]                        = ["Synonym", "FormOf"]
+    relations: list[str]                        = ["Synonym", "FormOf", "DerivedFrom",
+        "EtymologicallyRelatedTo"]
     # The languages of the database; the first one is that of the HPO.
     languages: list[str]                        = Field(default = ["en"], min_length = 1)
     # Steps along the relations from a word.
