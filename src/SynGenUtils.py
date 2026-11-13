@@ -506,7 +506,7 @@ def rankCandidates(candidates : pd.DataFrame, previous : pd.DataFrame, labels : 
     Without the normalised comparison, inflections and reorderings of the
     label (e.g. "Short statures", "Stature, short"), which are about as
     similar to it as the label itself, would take the places of new
-    synonyms, and then be marked as_label or match nothing new.
+    synonyms.
     """
     l = Logger()
     if len(candidates.index) == 0:
@@ -580,35 +580,28 @@ def seedTerms(previous : pd.DataFrame, labels : dict, concepts : list,
         seeds[hpoID] = [term for key, term in unique.items() if key != ""]
     return seeds
 
-def markAsLabel(synonyms : pd.DataFrame, labels : dict, normalized : bool = True) -> pd.DataFrame:
+def markAsLabel(synonyms : pd.DataFrame, labels : dict) -> pd.DataFrame:
     """
     Sets the as_label column: whether a synonym equals the label of its
-    concept, lexically or (if `normalized`) normalised. Without `normalized`
-    the normalizer is not needed, as in the LLM's Python environment; the
-    steps after it mark the synonyms again (readPreviousStage()).
+    concept lexically (lexicalKey(): case and white space ignored), the rule
+    by which goldStandard() leaves gold synonyms out. A reordering or
+    inflection of the label (e.g. "Stature, short") is not as_label and is
+    scored, as such gold synonyms are kept.
     """
-    # Only the labels of the concepts with synonyms are normalised.
-    concepts       = set(synonyms[idColumn])
-    labels         = {hpoID : label for hpoID, label in labels.items() if hpoID in concepts}
-    labelKeys      = {hpoID : lexicalKey(label) for hpoID, label in labels.items()}
-    labelNormKeys  = dict(zip(labels.keys(), normalizedKeys(list(labels.values())))) if normalized else {}
-    synonymNormKeys = (normalizedKeys(synonyms[synonymColumn].tolist()) if normalized
-        else [""] * len(synonyms.index))
+    labelKeys = {hpoID : lexicalKey(label) for hpoID, label in labels.items()}
     # Boolean also without synonyms: an empty float column would turn the
     # True of the stages before into 1.0 in writeStage(), which readSynonyms()
     # reads as False.
     synonyms[asLabelColumn] = pd.Series([
-        lexicalKey(synonym) == labelKeys.get(hpoID) or
-            (key != "" and key == labelNormKeys.get(hpoID))
-        for hpoID, synonym, key in zip(synonyms[idColumn], synonyms[synonymColumn], synonymNormKeys)
+        lexicalKey(synonym) == labelKeys.get(hpoID)
+        for hpoID, synonym in zip(synonyms[idColumn], synonyms[synonymColumn])
     ], index = synonyms.index, dtype = bool)
     return synonyms
 
 def readPreviousStage(stage : str, modelName : str, labels : dict) -> pd.DataFrame:
     """
-    The synonyms of the stages before `stage`, marked again with the
-    normalised match, as the LLM stage only marks them lexically (see
-    markAsLabel()).
+    The synonyms of the stages before `stage`, marked again with
+    markAsLabel(), so that files of earlier runs follow the same rule.
     """
     return markAsLabel(readSynonyms(outputFileStage(previousStage(stage), modelName)), labels)
 

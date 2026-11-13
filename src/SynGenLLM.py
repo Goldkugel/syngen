@@ -7,10 +7,8 @@ round with its own seed; a synonym records in how many rounds it was
 generated. The model package is imported by the step that needs it, so the
 preparation run does not load vLLM.
 
-The model and the normalizer need different Python environments, so the
-file of the LLM stage marks the synonyms equal to their label only lexically
-(case and white space ignored); the steps after it, which run with the
-normalizer, add the normalised match (readPreviousStage()).
+Synonyms equal to their label (case and white space ignored) are marked
+as_label and not scored (markAsLabel()).
 
     python3 ./src/SynGenLLM.py                  preparation
     python3 ./src/SynGenLLM.py <index>          experiment <index>, all models
@@ -176,13 +174,10 @@ def generateSynonyms(modelID : str) -> pd.DataFrame:
     found = pd.DataFrame(found, columns = [idColumn, "round", synonymColumn, "key"])
     synonyms = countRounds(found)
     synonyms[modelColumn] = modelName
-    # Lexically only: the normalizer is not available here
-    synonyms = markAsLabel(synonyms, {hpoID : information[hpoID]["label"] for hpoID in concepts},
-        normalized = False)
+    synonyms = markAsLabel(synonyms, {hpoID : information[hpoID]["label"] for hpoID in concepts})
 
     l.log(f"{len(synonyms.index)} distinct synonyms of {synonyms[idColumn].nunique()} of " \
-        f"{len(concepts)} concepts; {synonyms[asLabelColumn].sum()} equal their label " \
-        "(lexically).")
+        f"{len(concepts)} concepts; {synonyms[asLabelColumn].sum()} equal their label.")
     for count, number in synonyms[roundsColumn].value_counts().sort_index().items():
         l.log(f"Generated in {count} of {rounds} rounds: {number} synonyms.")
 

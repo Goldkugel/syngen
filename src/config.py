@@ -142,8 +142,9 @@ seedColumn                  = "seed"
 evidenceColumn              = "evidence"
 frequencyColumn             = "frequency"
 similarityColumn            = f"similarity_{embeddingModelName}"
-# Whether the synonym equals the label of its concept (normalised); such
-# synonyms are reported as "as_label" and not scored.
+# Whether the synonym equals the label of its concept (case and white space
+# ignored, as in the gold standard); such synonyms are reported as
+# "as_label" and not scored.
 asLabelColumn               = "as_label"
 # SynGenEmbed.py: the normalised synonym (its sorted tokens) and a key equal
 # for synonyms with the same embedding.

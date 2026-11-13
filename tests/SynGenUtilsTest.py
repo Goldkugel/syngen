@@ -81,23 +81,20 @@ def testMarkAsLabel():
         {idColumn : "HP:1", synonymColumn : "Stature, short"},
         {idColumn : "HP:1", synonymColumn : "Small stature"}])
     marked = markAsLabel(synonyms, {"HP:1" : "Short stature"})
-    assert marked[asLabelColumn].tolist() == [True, True, False]
+    # Only the lexical match, as for the gold standard: a reordering is scored.
+    assert marked[asLabelColumn].tolist() == [True, False, False]
 
-def testLexicalMarkingIsCompletedByTheNextStage(tmp_path, monkeypatch):
-    # The LLM stage marks without the normalizer, the next stage adds the
-    # normalised match.
+def testReadPreviousStageMarksAgain(tmp_path, monkeypatch):
+    # A file of an earlier run, marked with another rule, is marked again.
     import SynGenUtils
     file = str(tmp_path / "llm.csv")
     monkeypatch.setattr(SynGenUtils, "outputFileStage", lambda stage, modelName: file)
     synonyms = synonymFrame([
-        {idColumn : "HP:1", synonymColumn : "SHORT stature", sourceColumn : llmStage},
-        {idColumn : "HP:1", synonymColumn : "Stature, short", sourceColumn : llmStage}])
+        {idColumn : "HP:1", synonymColumn : "SHORT stature", sourceColumn : llmStage, asLabelColumn : True},
+        {idColumn : "HP:1", synonymColumn : "Stature, short", sourceColumn : llmStage, asLabelColumn : True}])
     labels = {"HP:1" : "Short stature"}
-    marked = markAsLabel(synonyms, labels, normalized = False)
-    assert marked[asLabelColumn].tolist() == [True, False]
-
-    writeHugeCSV(marked, file)
-    assert readPreviousStage(pubmedStage, "model", labels)[asLabelColumn].tolist() == [True, True]
+    writeHugeCSV(synonyms, file)
+    assert readPreviousStage(pubmedStage, "model", labels)[asLabelColumn].tolist() == [True, False]
 
 def testStageWithoutCandidatesKeepsAsLabel(tmp_path, monkeypatch):
     # A stage that finds nothing keeps the as_label of the stages before.

@@ -91,8 +91,8 @@ def embedModel(modelID : str) -> None:
     gold      = goldStandard(data)
     gold      = gold[gold[idColumn].isin(concepts)].reset_index(drop = True)
     labels    = labelsByConcept(data)
-    # The LLM stage marks its synonyms only lexically; in an experiment
-    # without other stages its file is the final one.
+    # Marked again, so that files of earlier runs follow the same rule as
+    # the gold standard.
     generated = markAsLabel(generated, labels)
     l.log(f"{len(generated.index)} generated synonyms of {generated[idColumn].nunique()} " \
         f"concepts, {len(gold.index)} gold synonyms of {gold[idColumn].nunique()} concepts.")
