@@ -121,6 +121,21 @@ def testRankCandidates(monkeypatch):
     # d is known, c not similar, Label the label; b the most similar.
     assert ranked[synonymColumn].tolist() == ["b"]
 
+def testRankCandidatesComparesNormalised(monkeypatch):
+    import SynGenUtils
+    similarity = {"Short statures" : 0.99, "Stature, short" : 0.98, "Small stature" : 0.95,
+        "small statures" : 0.97, "Height deficit" : 0.96, "the" : 0.9}
+    monkeypatch.setattr(SynGenUtils, "similarities",
+        lambda texts, references: [similarity[t] for t in texts])
+    candidates = synonymFrame([{idColumn : "HP:1", synonymColumn : s} for s in similarity])
+    previous   = synonymFrame([{idColumn : "HP:1", synonymColumn : "Deficit of height"}])
+    ranked = SynGenUtils.rankCandidates(candidates, previous, {"HP:1" : "Short stature"}, 0.8, 10)
+    # The label inflected or reordered, and a known synonym reordered, are
+    # dropped; of "Small stature" and "small statures" the more similar is
+    # kept; "the" has no normalised key and is compared lexically only.
+    assert ranked[synonymColumn].tolist() == ["small statures", "the"]
+    assert "_key" not in ranked.columns
+
 def testExperimentStages():
     assert ExperimentConfig().stages == ["llm", "pubmed", "conceptnet"]
     assert ExperimentConfig(stages = ["llm", "conceptnet"]).stages == ["llm", "conceptnet"]

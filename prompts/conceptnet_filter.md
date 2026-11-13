@@ -10,6 +10,12 @@ Keep a candidate only if:
 
 Drop candidates of another meaning of {token} that does not apply here, e.g., a meaning outside medicine.
 
+Drop candidates that name a kind, a part or an example of {token} (narrower) or a class {token} belongs to (broader), even if they are closely related. E.g., for "tooth", drop "milk tooth", "molar" and "fang" (kinds of teeth) as well as "body part" (broader).
+
+Drop a word derived from {token} (e.g., "nasal" for "nose") if the term with it is not correct English as it stands.
+
+If you are unsure, drop the candidate.
+
 Concept:
 
 * Label: {hpo_label}{hpo_details}

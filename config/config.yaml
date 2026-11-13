@@ -58,9 +58,14 @@ syngen:
     # it (with the relations and languages below).
     dump: "./data/input/conceptnet/conceptnet-assertions-5.7.0.csv.gz"
     database: "./data/input/conceptnet/conceptnet.sqlite"
+    # DerivedFrom and EtymologicallyRelatedTo add derived words, e.g.
+    # "nasal" for "nose"; changing the relations needs the database built
+    # again (SynGenConceptNetDB.py).
     relations:
       - "Synonym"
       - "FormOf"
+      - "DerivedFrom"
+      - "EtymologicallyRelatedTo"
     languages:
       - "en"
     hops: 1
